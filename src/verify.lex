@@ -223,20 +223,81 @@ fn verify_run(r :: rec.Run) -> [io] RunVerdict {
   }
 }
 
-fn verify_content(r :: rec.Run, e :: rec.Evidence, content :: Str) -> RunVerdict {
-  let digest := crypto.sha256_str(content)
-  if not (digest == e.sha256) {
-    verdict(r.run_id, Tampered, str.join(["evidence digest mismatch: recorded ", e.sha256, ", file hashes to ", digest], ""), all_claims_as(r.results_json, Tampered, "evidence repudiated; claim not scored"))
+fn is_bound(e :: rec.Evidence) -> Bool
+  examples {
+    is_bound({ kind: "replay_trail", path: "p", sha256: "", trail_head: "" }) => false,
+    is_bound({ kind: "replay_trail", path: "p", sha256: "ab", trail_head: "" }) => true,
+    is_bound({ kind: "replay_trail", path: "p", sha256: "", trail_head: "cd" }) => true
+  }
+{
+  not (str.is_empty(e.sha256) and str.is_empty(e.trail_head))
+}
+
+fn tampered(r :: rec.Run, detail :: Str, claim_detail :: Str) -> RunVerdict {
+  verdict(r.run_id, Tampered, detail, all_claims_as(r.results_json, Tampered, claim_detail))
+}
+
+# Check whichever bindings the record committed to. A binding that is absent
+# is not checked; a binding that is present and wrong is repudiation.
+fn check_digest(e :: rec.Evidence, content :: Str) -> Result[Unit, Str] {
+  if str.is_empty(e.sha256) {
+    Ok(())
   } else {
-    match tr.parse_jsonl(content) {
-      Err(msg) => verdict(r.run_id, Tampered, str.concat("evidence is not a readable trail: ", msg), all_claims_as(r.results_json, Tampered, "evidence unparseable; claim not scored")),
-      Ok(lines) => if not tr.trail_intact(lines) {
-        verdict(r.run_id, Tampered, "trail hash chain is broken: an event id does not recompute, or a parent link is wrong", all_claims_as(r.results_json, Tampered, "evidence repudiated; claim not scored"))
-      } else {
-        match derive.metrics(e.kind, lines) {
-          Err(msg) => verdict(r.run_id, Tampered, str.join(["trail intact but a ", e.kind, " payload is malformed: ", msg], ""), all_claims_as(r.results_json, Tampered, "evidence unusable; claim not scored")),
-          Ok(ms) => verdict(r.run_id, Verified, "evidence digest matches and the hash chain is intact", score_all(ms, r.results_json)),
-        }
+    let digest := crypto.sha256_str(content)
+    if digest == e.sha256 {
+      Ok(())
+    } else {
+      Err(str.join(["evidence digest mismatch: recorded ", e.sha256, ", file hashes to ", digest], ""))
+    }
+  }
+}
+
+fn check_head(e :: rec.Evidence, lines :: List[tr.Line]) -> Result[Unit, Str] {
+  if str.is_empty(e.trail_head) {
+    Ok(())
+  } else {
+    let head := tr.head_id(lines)
+    if head == e.trail_head {
+      Ok(())
+    } else {
+      Err(str.join(["trail head mismatch: recorded ", e.trail_head, ", presented chain ends at ", head], ""))
+    }
+  }
+}
+
+# What the run is actually standing on, for the verdict line — worth naming,
+# because a head binding and a byte binding are different promises.
+fn binding_detail(e :: rec.Evidence) -> Str {
+  if str.is_empty(e.trail_head) {
+    "evidence digest matches and the hash chain is intact"
+  } else {
+    if str.is_empty(e.sha256) {
+      "trail head matches and the hash chain is intact"
+    } else {
+      "evidence digest and trail head both match, and the hash chain is intact"
+    }
+  }
+}
+
+fn verify_content(r :: rec.Run, e :: rec.Evidence, content :: Str) -> RunVerdict {
+  if not is_bound(e) {
+    verdict(r.run_id, Unverifiable, str.join(["evidence is unbound: ", e.path, " was recorded with neither a digest nor a trail head"], ""), all_claims_as(r.results_json, Unverifiable, "evidence is unbound; nothing commits the record to it"))
+  } else {
+    match check_digest(e, content) {
+      Err(msg) => tampered(r, msg, "evidence repudiated; claim not scored"),
+      Ok(_) => match tr.parse_jsonl(content) {
+        Err(msg) => tampered(r, str.concat("evidence is not a readable trail: ", msg), "evidence unparseable; claim not scored"),
+        Ok(lines) => if not tr.trail_intact(lines) {
+          tampered(r, "trail hash chain is broken: an event id does not recompute, or a parent link is wrong", "evidence repudiated; claim not scored")
+        } else {
+          match check_head(e, lines) {
+            Err(msg) => tampered(r, msg, "evidence repudiated; claim not scored"),
+            Ok(_) => match derive.metrics(e.kind, lines) {
+              Err(msg) => tampered(r, str.join(["trail intact but a ", e.kind, " payload is malformed: ", msg], ""), "evidence unusable; claim not scored"),
+              Ok(ms) => verdict(r.run_id, Verified, binding_detail(e), score_all(ms, r.results_json)),
+            },
+          }
+        },
       },
     }
   }

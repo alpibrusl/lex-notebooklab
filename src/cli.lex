@@ -35,6 +35,10 @@ import "./store" as store
 
 import "./verify" as vfy
 
+import "./trail" as tr
+
+import "./derive" as derive
+
 # The JSON a client hands to `record`. `config` and `results` are open maps,
 # held as opaque `Json` on the parse side and normalised into canonical
 # strings by `rec.build`.
@@ -70,14 +74,40 @@ fn emit(s :: Str, code :: Int) -> [io] Int {
 # computed here from the file itself. That is a convenience, not a shortcut:
 # the hash is still taken over the actual bytes, and an entry that names a file
 # which cannot be read is rejected rather than recorded with a blank binding.
-fn hash_evidence(e :: rec.Evidence) -> [io] Result[rec.Evidence, Str] {
-  if not str.is_empty(e.sha256) {
+# For a trail, the preferred binding is the chain head rather than the bytes:
+# it commits to the same events while leaving the producer free to move or
+# re-serialize the artifact. `record` fills it in for any evidence kind that
+# has a deriver, unless the submitter pinned one explicitly.
+#
+# Recording is where a broken chain should be caught, not months later at
+# verify time — so a trail that fails its own integrity check is REJECTED here
+# rather than stored with a binding to nonsense.
+fn bind_trail_head(e :: rec.Evidence, content :: Str) -> Result[rec.Evidence, Str] {
+  if not (str.is_empty(e.trail_head) and derive.has_deriver(e.kind)) {
     Ok(e)
   } else {
-    match io.read(e.path) {
-      Err(msg) => Err(str.join(["cannot hash evidence ", e.path, ": ", msg], "")),
-      Ok(content) => Ok({ kind: e.kind, path: e.path, sha256: crypto.sha256_str(content) }),
+    match tr.parse_jsonl(content) {
+      Err(msg) => Err(str.join(["evidence ", e.path, " is not a readable trail: ", msg], "")),
+      Ok(lines) => if not tr.trail_intact(lines) {
+        Err(str.join(["refusing to record ", e.path, ": its hash chain is already broken"], ""))
+      } else {
+        Ok({ kind: e.kind, path: e.path, sha256: e.sha256, trail_head: tr.head_id(lines) })
+      },
     }
+  }
+}
+
+fn hash_evidence(e :: rec.Evidence) -> [io] Result[rec.Evidence, Str] {
+  match io.read(e.path) {
+    Err(msg) => Err(str.join(["cannot read evidence ", e.path, ": ", msg], "")),
+    Ok(content) => {
+      let with_digest := if str.is_empty(e.sha256) and not derive.has_deriver(e.kind) {
+        { kind: e.kind, path: e.path, sha256: crypto.sha256_str(content), trail_head: e.trail_head }
+      } else {
+        e
+      }
+      bind_trail_head(with_digest, content)
+    },
   }
 }
 

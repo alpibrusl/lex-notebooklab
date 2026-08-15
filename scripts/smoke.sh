@@ -63,6 +63,18 @@ set -e
 [ "$code" -eq 3 ] || { echo "FAIL: expected exit 3 (MISMATCH), got $code" >&2; exit 1; }
 echo "ok: exit 3"
 
+# The case chain integrity alone cannot catch: a prefix of the real trail,
+# perfectly valid in itself. Only the recorded head reveals it.
+say "verify: a truncated but internally valid chain (expect 4)"
+TRUNC_STORE="$(mktemp -d)/runs.jsonl"
+./bin/notebooklab --store "$TRUNC_STORE" record fixtures/entry_truncated.json >/dev/null
+set +e
+./bin/notebooklab --store "$TRUNC_STORE" verify
+code=$?
+set -e
+[ "$code" -eq 4 ] || { echo "FAIL: expected exit 4 (TAMPERED), got $code" >&2; exit 1; }
+echo "ok: exit 4"
+
 say "verify: an edited trail (expect 4)"
 TAMPER_STORE="$(mktemp -d)/runs.jsonl"
 ./bin/notebooklab --store "$TAMPER_STORE" record fixtures/entry_tampered.json >/dev/null

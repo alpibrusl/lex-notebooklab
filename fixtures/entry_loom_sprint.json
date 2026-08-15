@@ -2,9 +2,31 @@
   "attempt": "sprint_demo_1",
   "series": "loom-sprint",
   "trainer": "lex-loom sprint engine",
-  "config": { "graph_nodes": 3, "phases": ["design", "implementation", "qa"] },
-  "results": { "nodes_started": 6, "nodes_denied": 2, "denial_rate_pct": 33, "bounces": 1, "gate.tests.denials": 1, "phase.implementation.bounces": 1, "fully_sealed": 1 },
-  "evidence": [ { "kind": "loom_sprint_trail", "path": "fixtures/loom_sprint_trail.jsonl", "sha256": "" } ],
+  "config": {
+    "graph_nodes": 3,
+    "phases": [
+      "design",
+      "implementation",
+      "qa"
+    ]
+  },
+  "results": {
+    "nodes_started": 6,
+    "nodes_denied": 2,
+    "denial_rate_pct": 33,
+    "bounces": 1,
+    "gate.tests.denials": 1,
+    "phase.implementation.bounces": 1,
+    "fully_sealed": 1
+  },
+  "evidence": [
+    {
+      "kind": "loom_sprint_trail",
+      "path": "fixtures/loom_sprint_trail.jsonl",
+      "sha256": "",
+      "trail_head": ""
+    }
+  ],
   "notes": "A sprint that bounced once out of QA and recovered.",
   "supersedes": "",
   "created_at": 1750000000004

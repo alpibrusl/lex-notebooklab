@@ -2,9 +2,21 @@
   "attempt": "4-bogus",
   "series": "usage-informed-finetune",
   "trainer": "sidecar/xlerobot_rl_finetune.py",
-  "config": { "timesteps": 100000 },
-  "results": { "actions": 16, "denials": 0 },
-  "evidence": [ { "kind": "replay_trail", "path": "fixtures/xlerobot_rl_trail.jsonl", "sha256": "" } ],
+  "config": {
+    "timesteps": 100000
+  },
+  "results": {
+    "actions": 16,
+    "denials": 0
+  },
+  "evidence": [
+    {
+      "kind": "replay_trail",
+      "path": "fixtures/xlerobot_rl_trail.jsonl",
+      "sha256": "",
+      "trail_head": ""
+    }
+  ],
   "notes": "Claims a fully compliant run. The trail says otherwise.",
   "supersedes": "",
   "created_at": 1750000000001

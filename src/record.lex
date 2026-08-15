@@ -29,10 +29,28 @@ import "std.crypto" as crypto
 
 import "std.json" as json
 
-# One piece of evidence bound to a run. `kind` is free-form ("replay_trail",
-# "checkpoint", …); `path` is where the artifact lives; `sha256` is its digest
-# at record time — the binding that makes tampering detectable later.
-type Evidence = { kind :: Str, path :: Str, sha256 :: Str }
+# One piece of evidence bound to a run. `kind` selects the deriver that can
+# interpret it (src/derive.lex); `path` is where the artifact lives.
+#
+# The remaining two fields are BINDINGS — the commitments that make later
+# tampering detectable — and which one applies depends on what the artifact is:
+#
+#   sha256      the digest of the bytes. The only binding possible for an
+#               opaque artifact such as a checkpoint, where there is no
+#               internal structure to commit to.
+#   trail_head  the id of the last event in a hash-chained trail. Because
+#               `event.compute_id` folds the parent id into every event, the
+#               head transitively commits to the whole chain — so this binds
+#               the EVIDENCE rather than its container, and the same chain
+#               verifies whether it arrives as a JSONL file, a range of
+#               database rows, or bytes over a socket. Prefer it for trails: a
+#               byte digest also fails on a harmless re-serialization, which is
+#               a false alarm, and it forces the producer to keep an immutable
+#               file around forever, which is a real constraint.
+#
+# Either may be "" (absent). Both may be set, and then both are checked. An
+# evidence entry with neither is unbound and settles nothing.
+type Evidence = { kind :: Str, path :: Str, sha256 :: Str, trail_head :: Str }
 
 # The v0 run record.
 #
@@ -74,16 +92,16 @@ fn quoted(s :: Str) -> Str
 # ---- Evidence ------------------------------------------------------------
 fn evidence_json(e :: Evidence) -> Str
   examples {
-    evidence_json({ kind: "replay_trail", path: "t.jsonl", sha256: "ab" }) => "{\"kind\":\"replay_trail\",\"path\":\"t.jsonl\",\"sha256\":\"ab\"}"
+    evidence_json({ kind: "replay_trail", path: "t.jsonl", sha256: "ab", trail_head: "cd" }) => "{\"kind\":\"replay_trail\",\"path\":\"t.jsonl\",\"sha256\":\"ab\",\"trail_head\":\"cd\"}"
   }
 {
-  str.join(["{\"kind\":", quoted(e.kind), ",\"path\":", quoted(e.path), ",\"sha256\":", quoted(e.sha256), "}"], "")
+  str.join(["{\"kind\":", quoted(e.kind), ",\"path\":", quoted(e.path), ",\"sha256\":", quoted(e.sha256), ",\"trail_head\":", quoted(e.trail_head), "}"], "")
 }
 
 fn evidence_list_json(es :: List[Evidence]) -> Str
   examples {
     evidence_list_json([]) => "[]",
-    evidence_list_json([{ kind: "k", path: "p", sha256: "s" }]) => "[{\"kind\":\"k\",\"path\":\"p\",\"sha256\":\"s\"}]"
+    evidence_list_json([{ kind: "k", path: "p", sha256: "s", trail_head: "" }]) => "[{\"kind\":\"k\",\"path\":\"p\",\"sha256\":\"s\",\"trail_head\":\"\"}]"
   }
 {
   str.join(["[", str.join(list.map(es, evidence_json), ","), "]"], "")
@@ -94,8 +112,8 @@ fn evidence_list_json(es :: List[Evidence]) -> Str
 fn evidence_of_kind(es :: List[Evidence], kind :: Str) -> Option[Evidence]
   examples {
     evidence_of_kind([], "replay_trail") => None,
-    evidence_of_kind([{ kind: "checkpoint", path: "p", sha256: "s" }], "replay_trail") => None,
-    evidence_of_kind([{ kind: "replay_trail", path: "p", sha256: "s" }], "replay_trail") => Some({ kind: "replay_trail", path: "p", sha256: "s" })
+    evidence_of_kind([{ kind: "checkpoint", path: "p", sha256: "s", trail_head: "" }], "replay_trail") => None,
+    evidence_of_kind([{ kind: "replay_trail", path: "p", sha256: "s", trail_head: "" }], "replay_trail") => Some({ kind: "replay_trail", path: "p", sha256: "s", trail_head: "" })
   }
 {
   list.head(list.filter(es, fn (e :: Evidence) -> Bool {
@@ -278,7 +296,7 @@ fn superseded_run(r :: Run) -> Option[Str]
 fn has_evidence(r :: Run) -> Bool
   examples {
     has_evidence(blank()) => false,
-    has_evidence(with_evidence(blank(), [{ kind: "replay_trail", path: "t", sha256: "s" }])) => true
+    has_evidence(with_evidence(blank(), [{ kind: "replay_trail", path: "t", sha256: "s", trail_head: "" }])) => true
   }
 {
   not list.is_empty(r.evidence)
@@ -290,7 +308,7 @@ fn has_evidence(r :: Run) -> Bool
 fn with_evidence(r :: Run, es :: List[Evidence]) -> Run
   examples {
     with_evidence(blank(), []) => blank(),
-    with_evidence(blank(), [{ kind: "k", path: "p", sha256: "s" }]) => { run_id: "", attempt: "", series: "", trainer: "", config_json: "{}", results_json: "{}", evidence: [{ kind: "k", path: "p", sha256: "s" }], notes: "", supersedes: "", created_at: 0, extra_json: "" }
+    with_evidence(blank(), [{ kind: "k", path: "p", sha256: "s", trail_head: "" }]) => { run_id: "", attempt: "", series: "", trainer: "", config_json: "{}", results_json: "{}", evidence: [{ kind: "k", path: "p", sha256: "s", trail_head: "" }], notes: "", supersedes: "", created_at: 0, extra_json: "" }
   }
 {
   { run_id: r.run_id, attempt: r.attempt, series: r.series, trainer: r.trainer, config_json: r.config_json, results_json: r.results_json, evidence: es, notes: r.notes, supersedes: r.supersedes, created_at: r.created_at, extra_json: r.extra_json }

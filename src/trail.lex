@@ -141,3 +141,21 @@ fn of_kind(ls :: List[Line], kind :: Str) -> List[Line] {
   })
 }
 
+# The chain's head: the id of its last event.
+#
+# This is the whole point of a hash chain. `event.compute_id` folds the parent
+# id into every event, so the head transitively commits to every event before
+# it — truncate, extend, edit or reorder the chain and the head changes.
+# Binding a run to this rather than to a file digest makes the evidence's
+# CONTAINER irrelevant: the same chain verifies whether it arrived as a JSONL
+# file, a row range in a database, or bytes over a socket.
+#
+# Safe against being handed a suffix of a real chain only because
+# `chain_linked` separately requires the first line to be root-anchored.
+fn head_id(ls :: List[Line]) -> Str {
+  match list.head(list.reverse(ls)) {
+    None => "",
+    Some(l) => l.id,
+  }
+}
+

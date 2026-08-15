@@ -120,16 +120,56 @@ claims are checked against.
 1. Find the first bound artifact some deriver understands. None → every claim
    `UNVERIFIABLE`. (A checkpoint digest is legitimate evidence to record but
    settles no claim on its own, so it has no deriver.)
-2. Hash the file and compare against the digest the record committed to. A
+2. Check whatever **bindings** the record committed to (see below). Any
    mismatch is `TAMPERED` — repudiated evidence, not weak evidence — and
    nothing is derived from it. Same stance lex-games' referee takes when it
-   disqualifies a forged trail instead of scoring it.
+   disqualifies a forged trail instead of scoring it. Evidence bound by
+   *nothing* is `UNVERIFIABLE`, not tampered: it was never committed to.
 3. Check the trail's own hash chain: every event id must recompute (via
    `lex-trail`'s `event.compute_id`) and every `parent` must be the previous
-   event's id. This catches an edit, a reorder, an insertion or a deletion —
-   including one where the forger refreshed the recorded digest to match.
+   event's id, starting from a root. This catches an edit, a reorder, an
+   insertion or a deletion.
 4. Hand the events to the deriver for that evidence kind, and diff what it
    publishes against each claim.
+
+### Bindings: what a record commits to
+
+An evidence entry carries two optional commitments, and which one applies
+depends on what the artifact is.
+
+| Binding | Commits to | Use for |
+|---|---|---|
+| `sha256` | the exact bytes | opaque artifacts — a checkpoint has no internal structure to commit to |
+| `trail_head` | the id of the chain's last event | **trails** |
+
+`trail_head` is the better binding for a trail, and the reason is the chain
+itself: `compute_id` folds the parent id into every event, so the head
+**transitively commits to every event before it**. Truncate, extend, edit or
+reorder and the head changes.
+
+Two things follow. First, the evidence's *container* stops mattering — the
+same chain verifies whether it arrives as a JSONL file, a range of database
+rows, or bytes over a socket, which means a producer is not forced to keep an
+immutable file around forever. Second, a harmless re-serialization (different
+whitespace, different field order) no longer reads as tampering, which a byte
+digest would flag as a false alarm.
+
+It is also strictly stronger than chain integrity alone. A **prefix** of a real
+trail is a perfectly valid chain — every id recomputes, every link holds, it is
+root-anchored — so integrity checks pass. Only the recorded head reveals that
+events were dropped:
+
+```
+$ notebooklab verify
+67802d3f4cd0  TAMPERED  (evidence: TAMPERED — trail head mismatch:
+              recorded 8add8b4a511c…, presented chain ends at 406253eadf02…)
+```
+
+`notebooklab record` fills `trail_head` in automatically for any evidence kind
+that has a deriver, and **refuses to record a trail whose chain is already
+broken** — the right place to catch that is at recording time, not months later.
+Opaque artifacts get `sha256` filled in instead. Both may be set, and then both
+are checked.
 
 **Bounds come from the grant recorded in the trail**, not from constants in the
 verifier. lex-robot's `gym_env/xlerobot_usage_log.py` hardcodes `ARM_BOUNDS` /
