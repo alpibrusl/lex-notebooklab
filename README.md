@@ -204,6 +204,46 @@ to argue about. Any key no deriver published — a string like
 reason. A MuJoCo SUCCESS/FAILED verdict has no trail
 representation, and inventing a check for it would be worse than admitting it.
 
+## The seed corpus
+
+`fixtures/lex_robot_experiments.jsonl` is a committed copy of lex-robot's
+`docs/experiments.jsonl` — **12 real training attempts**, the RL series
+written up in that repo's `docs/RL_TRAINING.md`.
+
+```sh
+lex run --allow-effects io src/import.lex import_ledger \
+  '"fixtures/lex_robot_experiments.jsonl"' '"runs.jsonl"'
+```
+
+Every one of them imports as `UNVERIFIABLE`, and that is the point rather
+than a shortfall: none of those runs kept its trail — they were written to
+`/tmp` and died with their containers — so there is nothing to recompute the
+claims from. An importer that produced green ticks here would have invented
+evidence. `verify` still exits 0, because "we checked what could be checked
+and nothing contradicted the record" is a pass.
+
+Three things the import has to get right, each with a test:
+
+- **Nesting.** A record's `results` must be flat. The ledger's `violations`
+  map is two levels deep, and attempt 9 carries a `ckpt_2500000_replay`
+  sub-object with an identically-shaped map of its own — appearing *first* in
+  the text. Reading that one would quietly substitute a checkpoint's
+  4-violation profile for the run's 22. Claims are flattened into the same
+  vocabulary `src/derive/robot.lex` publishes, so an imported claim becomes
+  checkable the moment a trail turns up for it.
+- **Units.** Upstream records metres and rates as decimals; this package
+  compares integers. `0.613` m becomes `613` mm and `0.5` becomes `50` pct —
+  a mapping, not a loss, and rounded rather than truncated.
+- **Nulls.** Attempts 1–3 record `"denial_rate": null` — the run did not
+  measure one. That is not a claim of zero and does not become one.
+
+**Round-trip.** Every imported record keeps its upstream entry verbatim in
+`source`, so `export_sources` hands the corpus back field for field, including
+keys this schema does not name. Key *order* is canonicalised (sorted) rather
+than preserved — a `run_id` is a content address and must not depend on the
+order a writer happened to emit keys in. Smoke asserts the exported 12 parse
+equal to the source 12.
+
 ## The HTTP door
 
 For when the run happens somewhere this package cannot reach — sb3/PyTorch on
@@ -363,6 +403,8 @@ src/verify.lex      claims vs evidence, the four verdicts            (#4)
 src/entry.lex       submit -> validate -> bind evidence -> append    (#3)
 src/cli.lex         record / list / show / verify, acli envelopes    (#5)
 src/server.lex      HTTP door over lex-web                           (#6)
+src/jsonx.lex       reading fields out of JSON text                  (#7)
+src/import.lex      lex-robot ledger -> records, and back            (#7)
 bin/notebooklab     exit-code wrapper around `lex run`               (#5)
 tools/              fixture generation, in Lex
 fixtures/           reference trails, a tampered twin, entries

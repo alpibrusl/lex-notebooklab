@@ -9,7 +9,7 @@ import "std.str" as str
 import "std.io" as io
 
 fn sample() -> rec.Run {
-  rec.seal({ run_id: "", attempt: "4", series: "usage-informed-finetune", trainer: "sidecar/xlerobot_rl_finetune.py", config_json: "{\"seed\":0,\"timesteps\":100000}", results_json: "{\"actions\":16,\"denials\":8}", evidence: [{ kind: "replay_trail", path: "fixtures/xlerobot_rl_trail.jsonl", sha256: "e6a2b0c7077a1a78c71208e6e3d6b49e7fa2ce7a6c9e24cc8fae19157d0e493e", trail_head: "8add8b4a511cbf5a671f13e149cb323614c5b82b76a59711f8340b288c1ff1b2" }], notes: "y-violations eliminated", supersedes: "", created_at: 1750000000000, extra_json: "" })
+  rec.seal({ run_id: "", attempt: "4", series: "usage-informed-finetune", trainer: "sidecar/xlerobot_rl_finetune.py", config_json: "{\"seed\":0,\"timesteps\":100000}", results_json: "{\"actions\":16,\"denials\":8}", evidence: [{ kind: "replay_trail", path: "fixtures/xlerobot_rl_trail.jsonl", sha256: "e6a2b0c7077a1a78c71208e6e3d6b49e7fa2ce7a6c9e24cc8fae19157d0e493e", trail_head: "8add8b4a511cbf5a671f13e149cb323614c5b82b76a59711f8340b288c1ff1b2" }], notes: "y-violations eliminated", supersedes: "", created_at: 1750000000000, extra_json: "", source_json: "{}" })
 }
 
 fn test_seal_is_idempotent() -> Result[Unit, Str] {
@@ -32,7 +32,7 @@ fn test_sealed_record_is_intact() -> Result[Unit, Str] {
 # keep its id. Changing a single claim must break the content address.
 fn test_edited_record_is_detected() -> Result[Unit, Str] {
   let s := sample()
-  let forged := { run_id: s.run_id, attempt: s.attempt, series: s.series, trainer: s.trainer, config_json: s.config_json, results_json: "{\"actions\":16,\"denials\":0}", evidence: s.evidence, notes: s.notes, supersedes: s.supersedes, created_at: s.created_at, extra_json: s.extra_json }
+  let forged := { run_id: s.run_id, attempt: s.attempt, series: s.series, trainer: s.trainer, config_json: s.config_json, results_json: "{\"actions\":16,\"denials\":0}", evidence: s.evidence, notes: s.notes, supersedes: s.supersedes, created_at: s.created_at, extra_json: s.extra_json, source_json: s.source_json }
   if not rec.is_intact(forged) {
     Ok(())
   } else {

@@ -101,6 +101,30 @@ lex run --allow-effects io tools/make_loom_fixture.lex build "\"$TMP_LOOM\"" >/d
 diff -q "$TMP_LOOM" fixtures/loom_sprint_trail.jsonl \
   && echo "ok: regenerated loom fixture is byte-identical"
 
+# The real corpus: 12 attempts from lex-robot's committed ledger. None has a
+# surviving trail, so every one must read UNVERIFIABLE and still exit 0 —
+# honesty is a pass. The round-trip is checked field-for-field, since key
+# ORDER is deliberately canonicalised (a content address must not depend on
+# the order a writer emitted keys in).
+say "import: lex-robot's 12-attempt ledger (expect 0, all UNVERIFIABLE)"
+IMPORT_STORE="$(mktemp -d)/runs.jsonl"
+lex run --allow-effects io src/import.lex import_ledger \
+  '"fixtures/lex_robot_experiments.jsonl"' "\"$IMPORT_STORE\""
+./bin/notebooklab --store "$IMPORT_STORE" verify >/dev/null
+echo "ok: 12 imported, all UNVERIFIABLE, exit 0"
+
+lex run --allow-effects io src/import.lex export_sources "\"$IMPORT_STORE\"" \
+  | tail -1 | python3 -c '
+import sys, json
+exported = json.loads(sys.stdin.read())["args"][0].split("\n")
+source = [l for l in open("fixtures/lex_robot_experiments.jsonl") if l.strip()]
+a = [json.loads(l) for l in exported]
+b = [json.loads(l) for l in source]
+assert len(a) == len(b) == 12, f"{len(a)} exported vs {len(b)} source"
+assert a == b, "export is not field-for-field identical to the source ledger"
+print("ok: import -> export reproduces all 12 entries field for field")
+'
+
 say "http door (issue #6)"
 bash scripts/smoke_http.sh
 

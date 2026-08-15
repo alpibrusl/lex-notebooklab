@@ -62,7 +62,13 @@ type Evidence = { kind :: Str, path :: Str, sha256 :: Str, trail_head :: Str }
 # not name, as a JSON object body without the enclosing braces (`"k":v,...`, ""
 # when there are none). Round-tripping it is what makes import → export
 # field-preserving.
-type Run = { run_id :: Str, attempt :: Str, series :: Str, trainer :: Str, config_json :: Str, results_json :: Str, evidence :: List[Evidence], notes :: Str, supersedes :: Str, created_at :: Int, extra_json :: Str }
+# `source_json` is the upstream entry this record was imported from, verbatim
+# (`{}` when the record was authored here rather than imported). It is what
+# makes import → export reproduce the source byte for byte, including fields
+# this schema does not name — and it is part of the canonical form, so
+# discarding what an upstream ledger carried changes the record's identity
+# rather than silently losing it.
+type Run = { run_id :: Str, attempt :: Str, series :: Str, trainer :: Str, config_json :: Str, results_json :: Str, evidence :: List[Evidence], notes :: Str, supersedes :: Str, created_at :: Int, extra_json :: Str, source_json :: Str }
 
 # ---- JSON escaping -------------------------------------------------------
 # Mirrors lex-games' arena/trail_file `esc` and extends it to the control
@@ -126,10 +132,10 @@ fn evidence_of_kind(es :: List[Evidence], kind :: Str) -> Option[Evidence]
 # `examples {}` blocks without a twelve-field literal in every one of them.
 fn blank() -> Run
   examples {
-    blank() => { run_id: "", attempt: "", series: "", trainer: "", config_json: "{}", results_json: "{}", evidence: [], notes: "", supersedes: "", created_at: 0, extra_json: "" }
+    blank() => { run_id: "", attempt: "", series: "", trainer: "", config_json: "{}", results_json: "{}", evidence: [], notes: "", supersedes: "", created_at: 0, extra_json: "", source_json: "{}" }
   }
 {
-  { run_id: "", attempt: "", series: "", trainer: "", config_json: "{}", results_json: "{}", evidence: [], notes: "", supersedes: "", created_at: 0, extra_json: "" }
+  { run_id: "", attempt: "", series: "", trainer: "", config_json: "{}", results_json: "{}", evidence: [], notes: "", supersedes: "", created_at: 0, extra_json: "", source_json: "{}" }
 }
 
 # ---- Canonical encoding + content address --------------------------------
@@ -155,10 +161,10 @@ fn extra_tail(extra_json :: Str) -> Str
 # drifting apart.
 fn canonical_fields(r :: Run) -> Str
   examples {
-    canonical_fields(blank()) => "\"attempt\":\"\",\"series\":\"\",\"trainer\":\"\",\"config\":{},\"results\":{},\"evidence\":[],\"notes\":\"\",\"supersedes\":\"\",\"created_at\":0"
+    canonical_fields(blank()) => "\"attempt\":\"\",\"series\":\"\",\"trainer\":\"\",\"config\":{},\"results\":{},\"evidence\":[],\"notes\":\"\",\"supersedes\":\"\",\"created_at\":0,\"source\":{}"
   }
 {
-  str.join(["\"attempt\":", quoted(r.attempt), ",\"series\":", quoted(r.series), ",\"trainer\":", quoted(r.trainer), ",\"config\":", r.config_json, ",\"results\":", r.results_json, ",\"evidence\":", evidence_list_json(r.evidence), ",\"notes\":", quoted(r.notes), ",\"supersedes\":", quoted(r.supersedes), ",\"created_at\":", int.to_str(r.created_at), extra_tail(r.extra_json)], "")
+  str.join(["\"attempt\":", quoted(r.attempt), ",\"series\":", quoted(r.series), ",\"trainer\":", quoted(r.trainer), ",\"config\":", r.config_json, ",\"results\":", r.results_json, ",\"evidence\":", evidence_list_json(r.evidence), ",\"notes\":", quoted(r.notes), ",\"supersedes\":", quoted(r.supersedes), ",\"created_at\":", int.to_str(r.created_at), ",\"source\":", r.source_json, extra_tail(r.extra_json)], "")
 }
 
 # The canonical encoding EXCLUDING run_id — this is what gets hashed.
@@ -184,11 +190,11 @@ fn compute_id(r :: Run) -> Str
 
 fn with_id(r :: Run, id :: Str) -> Run
   examples {
-    with_id(blank(), "abc") => { run_id: "abc", attempt: "", series: "", trainer: "", config_json: "{}", results_json: "{}", evidence: [], notes: "", supersedes: "", created_at: 0, extra_json: "" },
+    with_id(blank(), "abc") => { run_id: "abc", attempt: "", series: "", trainer: "", config_json: "{}", results_json: "{}", evidence: [], notes: "", supersedes: "", created_at: 0, extra_json: "", source_json: "{}" },
     with_id(blank(), "") => blank()
   }
 {
-  { run_id: id, attempt: r.attempt, series: r.series, trainer: r.trainer, config_json: r.config_json, results_json: r.results_json, evidence: r.evidence, notes: r.notes, supersedes: r.supersedes, created_at: r.created_at, extra_json: r.extra_json }
+  { run_id: id, attempt: r.attempt, series: r.series, trainer: r.trainer, config_json: r.config_json, results_json: r.results_json, evidence: r.evidence, notes: r.notes, supersedes: r.supersedes, created_at: r.created_at, extra_json: r.extra_json, source_json: r.source_json }
 }
 
 # Stamp a record with its own content address. Records enter the store only
@@ -236,7 +242,7 @@ fn to_json(r :: Run) -> Str
 # `normalize` puts freshly-supplied JSON into the same form on the way in,
 # which is what makes `run_id` independent of the key order a client happened
 # to send.
-type RunWire = { run_id :: Str, attempt :: Str, series :: Str, trainer :: Str, config :: Json, results :: Json, evidence :: List[Evidence], notes :: Str, supersedes :: Str, created_at :: Int }
+type RunWire = { run_id :: Str, attempt :: Str, series :: Str, trainer :: Str, config :: Json, results :: Json, evidence :: List[Evidence], notes :: Str, supersedes :: Str, created_at :: Int, source :: Json }
 
 # Re-render a JSON object string in canonical (key-sorted) form. Invalid JSON
 # is an error rather than a silent pass-through: a record whose config cannot
@@ -251,7 +257,7 @@ fn normalize(src :: Str) -> Result[Str, Str] {
 }
 
 fn of_wire(w :: RunWire) -> Run {
-  { run_id: w.run_id, attempt: w.attempt, series: w.series, trainer: w.trainer, config_json: json.stringify(w.config), results_json: json.stringify(w.results), evidence: w.evidence, notes: w.notes, supersedes: w.supersedes, created_at: w.created_at, extra_json: "" }
+  { run_id: w.run_id, attempt: w.attempt, series: w.series, trainer: w.trainer, config_json: json.stringify(w.config), results_json: json.stringify(w.results), evidence: w.evidence, notes: w.notes, supersedes: w.supersedes, created_at: w.created_at, extra_json: "", source_json: json.stringify(w.source) }
 }
 
 fn from_json(line :: Str) -> Result[Run, Str] {
@@ -266,11 +272,20 @@ fn from_json(line :: Str) -> Result[Run, Str] {
 # stamping the content address. This is the only way a record should be
 # created outside of tests — it guarantees the id matches the content.
 fn build(attempt :: Str, series :: Str, trainer :: Str, config_src :: Str, results_src :: Str, evidence :: List[Evidence], notes :: Str, supersedes :: Str, created_at :: Int) -> Result[Run, Str] {
+  make(attempt, series, trainer, config_src, results_src, evidence, notes, supersedes, created_at, "{}")
+}
+
+# As `build`, but carrying the upstream entry this record was imported from.
+# Only src/import.lex supplies it; everything authored here passes "{}".
+fn make(attempt :: Str, series :: Str, trainer :: Str, config_src :: Str, results_src :: Str, evidence :: List[Evidence], notes :: Str, supersedes :: Str, created_at :: Int, source_src :: Str) -> Result[Run, Str] {
   match normalize(config_src) {
     Err(e) => Err(str.concat("config: ", e)),
     Ok(cfg) => match normalize(results_src) {
       Err(e) => Err(str.concat("results: ", e)),
-      Ok(res) => Ok(seal({ run_id: "", attempt: attempt, series: series, trainer: trainer, config_json: cfg, results_json: res, evidence: evidence, notes: notes, supersedes: supersedes, created_at: created_at, extra_json: "" })),
+      Ok(res) => match normalize(source_src) {
+        Err(e) => Err(str.concat("source: ", e)),
+        Ok(src) => Ok(seal({ run_id: "", attempt: attempt, series: series, trainer: trainer, config_json: cfg, results_json: res, evidence: evidence, notes: notes, supersedes: supersedes, created_at: created_at, extra_json: "", source_json: src })),
+      },
     },
   }
 }
@@ -308,18 +323,18 @@ fn has_evidence(r :: Run) -> Bool
 fn with_evidence(r :: Run, es :: List[Evidence]) -> Run
   examples {
     with_evidence(blank(), []) => blank(),
-    with_evidence(blank(), [{ kind: "k", path: "p", sha256: "s", trail_head: "" }]) => { run_id: "", attempt: "", series: "", trainer: "", config_json: "{}", results_json: "{}", evidence: [{ kind: "k", path: "p", sha256: "s", trail_head: "" }], notes: "", supersedes: "", created_at: 0, extra_json: "" }
+    with_evidence(blank(), [{ kind: "k", path: "p", sha256: "s", trail_head: "" }]) => { run_id: "", attempt: "", series: "", trainer: "", config_json: "{}", results_json: "{}", evidence: [{ kind: "k", path: "p", sha256: "s", trail_head: "" }], notes: "", supersedes: "", created_at: 0, extra_json: "", source_json: "{}" }
   }
 {
-  { run_id: r.run_id, attempt: r.attempt, series: r.series, trainer: r.trainer, config_json: r.config_json, results_json: r.results_json, evidence: es, notes: r.notes, supersedes: r.supersedes, created_at: r.created_at, extra_json: r.extra_json }
+  { run_id: r.run_id, attempt: r.attempt, series: r.series, trainer: r.trainer, config_json: r.config_json, results_json: r.results_json, evidence: es, notes: r.notes, supersedes: r.supersedes, created_at: r.created_at, extra_json: r.extra_json, source_json: r.source_json }
 }
 
 fn with_supersedes(r :: Run, prior :: Str) -> Run
   examples {
     with_supersedes(blank(), "") => blank(),
-    with_supersedes(blank(), "run_7") => { run_id: "", attempt: "", series: "", trainer: "", config_json: "{}", results_json: "{}", evidence: [], notes: "", supersedes: "run_7", created_at: 0, extra_json: "" }
+    with_supersedes(blank(), "run_7") => { run_id: "", attempt: "", series: "", trainer: "", config_json: "{}", results_json: "{}", evidence: [], notes: "", supersedes: "run_7", created_at: 0, extra_json: "", source_json: "{}" }
   }
 {
-  { run_id: r.run_id, attempt: r.attempt, series: r.series, trainer: r.trainer, config_json: r.config_json, results_json: r.results_json, evidence: r.evidence, notes: r.notes, supersedes: prior, created_at: r.created_at, extra_json: r.extra_json }
+  { run_id: r.run_id, attempt: r.attempt, series: r.series, trainer: r.trainer, config_json: r.config_json, results_json: r.results_json, evidence: r.evidence, notes: r.notes, supersedes: prior, created_at: r.created_at, extra_json: r.extra_json, source_json: r.source_json }
 }
 

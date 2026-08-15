@@ -31,7 +31,7 @@ fn tampered_sha() -> Str {
 }
 
 fn run_with(results_json :: Str, evidence :: List[rec.Evidence]) -> rec.Run {
-  rec.seal({ run_id: "", attempt: "ppo-300k", series: "rl", trainer: "sidecar/xlerobot_rl_train.py", config_json: "{\"timesteps\":300000}", results_json: results_json, evidence: evidence, notes: "", supersedes: "", created_at: 1750000000000, extra_json: "" })
+  rec.seal({ run_id: "", attempt: "ppo-300k", series: "rl", trainer: "sidecar/xlerobot_rl_train.py", config_json: "{\"timesteps\":300000}", results_json: results_json, evidence: evidence, notes: "", supersedes: "", created_at: 1750000000000, extra_json: "", source_json: "{}" })
 }
 
 fn good_evidence() -> List[rec.Evidence] {

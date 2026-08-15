@@ -25,7 +25,7 @@ fn reset() -> [io] Result[Unit, Str] {
 }
 
 fn mk(attempt :: Str, denials :: Int) -> rec.Run {
-  rec.seal({ run_id: "", attempt: attempt, series: "rl", trainer: "t.py", config_json: "{\"timesteps\":200000}", results_json: str.join(["{\"denials\":", int.to_str(denials), "}"], ""), evidence: [], notes: "", supersedes: "", created_at: 1750000000000, extra_json: "" })
+  rec.seal({ run_id: "", attempt: attempt, series: "rl", trainer: "t.py", config_json: "{\"timesteps\":200000}", results_json: str.join(["{\"denials\":", int.to_str(denials), "}"], ""), evidence: [], notes: "", supersedes: "", created_at: 1750000000000, extra_json: "", source_json: "{}" })
 }
 
 fn test_append_iterate_get() -> [io] Result[Unit, Str] {
