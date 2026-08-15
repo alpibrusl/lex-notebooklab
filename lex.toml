@@ -1,0 +1,47 @@
+[package]
+name    = "lex-notebooklab"
+version = "0.1.0"
+lex     = "0.10.10"
+license = "EUPL-1.2"
+description = "Verifiable experiment tracking — a run is a trail, not a score"
+
+# Pinning story (issue #2). Measured, not assumed:
+#
+#   * No dependency repo in this ecosystem publishes git tags
+#     (`git ls-remote --tags` is empty for lex-trail, lex-schema, lex-web,
+#     lex-games), so tag pinning is not available. `rev = "<sha>"` is.
+#   * `lex pkg` accepts `rev`/`tag`/`branch` on a git dependency and honours
+#     them ("lex-trail rev=aad817037119 ... ok").
+#   * BUT the installer uses a flat package layout: pinning a package that
+#     something else in the closure also requires *unpinned* is a hard error —
+#     "version conflict: `lex-schema` is required as rev:460629be… but
+#     `lex-web` requires git:…lex-schema — flat layout can only hold one copy".
+#
+# A package can therefore only be pinned if it is a *leaf* of our closure.
+# That constraint, plus "keep the closure small", decides the dependency set:
+#
+#   - lex-trail is PINNED. It supplies `event.compute_id`, the hash that all
+#     tamper detection in src/verify.lex rests on — the single dependency
+#     where silent drift would turn a red verdict green. Nothing else in our
+#     closure requires it, so the pin holds.
+#   - lex-schema is UNPINNED and cannot be otherwise: lex-orm, lex-crypto,
+#     lex-log and lex-fix all declare it unpinned, and pinning it fails the
+#     install outright. This is the accepted residual risk; it is written down
+#     in the README rather than hidden.
+#   - lex-games is deliberately NOT a dependency, though it defines the
+#     trail-file JSONL format we read. Depending on it would (a) force
+#     lex-trail back to unpinned, since lex-games requires it unpinned, and
+#     (b) drag lex-positions/lex-money/lex-orm/lex-fix into a verifier's
+#     closure. src/trail.lex re-implements the ~15-line line format instead
+#     and tests/test_trail.lex pins that decision down with a byte-level
+#     compatibility assertion against a real committed lex-robot trail.
+#
+# The toolchain itself is pinned everywhere (`lex = "0.10.10"` above and
+# LEX_VERSION in .github/workflows/ci.yml) — the one pin that is always
+# available and always honoured.
+[dependencies]
+# Trail event type + content-addressed id (compute_id) — the basis for
+# tamper detection in src/verify.lex. Never hand-roll this hash.
+lex-trail  = { git = "https://github.com/alpibrusl/lex-trail", rev = "aad817037119bf7b5ea453dfaeff5fc18cc23d6f" }
+# Record validation (issue #3). Unpinned by force — see the note above.
+lex-schema = { git = "https://github.com/alpibrusl/lex-schema" }

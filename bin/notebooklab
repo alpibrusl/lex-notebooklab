@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# notebooklab — thin wrapper turning src/cli.lex's returned exit code into a
+# real process exit status.
+#
+# `lex run` prints a function's return value on its last line and always exits
+# 0 itself, so a Lex program cannot set the shell's exit status on its own.
+# This wrapper reads that last line and exits with it, which is what makes
+# `notebooklab verify` a usable CI gate:
+#
+#   0  every claim verified, or honestly unverifiable
+#   2  usage / input error
+#   3  MISMATCH — a claim contradicts the evidence
+#   4  TAMPERED — the evidence itself does not hold up
+#
+# Usage:
+#   notebooklab [--store PATH] record <entry.json>
+#   notebooklab [--store PATH] list
+#   notebooklab [--store PATH] list-json
+#   notebooklab [--store PATH] show <run_id>
+#   notebooklab [--store PATH] verify [run_id]     # no id = verify every run
+#
+# The store is --store, else $NOTEBOOKLAB_STORE, else ./runs.jsonl. It is a
+# flag rather than a positional so that `verify` with one argument is
+# unambiguously a run id.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+STORE="${NOTEBOOKLAB_STORE:-runs.jsonl}"
+
+usage() {
+  sed -n '15,21p' "$0" | sed 's/^# \{0,1\}//'
+  exit 2
+}
+
+# JSON-encode a shell string for `lex run`'s positional args.
+jarg() { printf '"%s"' "${1//\"/\\\"}"; }
+
+run_cli() {
+  local fn="$1"; shift
+  local out
+  if ! out="$(lex run --allow-effects io "$ROOT/src/cli.lex" "$fn" "$@" 2>&1)"; then
+    printf '%s\n' "$out" >&2
+    return 2
+  fi
+  # Everything except the final line is the program's own output; the final
+  # line is the exit code the function returned.
+  printf '%s\n' "$out" | sed '$d'
+  local code
+  code="$(printf '%s\n' "$out" | tail -n 1)"
+  case "$code" in
+    ''|*[!0-9]*)
+      printf 'notebooklab: could not read an exit code from lex run output\n' >&2
+      return 2
+      ;;
+    *) return "$code" ;;
+  esac
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --store) [ $# -ge 2 ] || usage; STORE="$2"; shift 2 ;;
+    --store=*) STORE="${1#--store=}"; shift ;;
+    *) break ;;
+  esac
+done
+
+[ $# -ge 1 ] || usage
+cmd="$1"; shift
+
+case "$cmd" in
+  record)
+    [ $# -eq 1 ] || usage
+    run_cli record "$(jarg "$STORE")" "$(jarg "$1")"
+    ;;
+  list)
+    [ $# -eq 0 ] || usage
+    run_cli list_runs "$(jarg "$STORE")"
+    ;;
+  list-json)
+    [ $# -eq 0 ] || usage
+    run_cli list_json "$(jarg "$STORE")"
+    ;;
+  show)
+    [ $# -eq 1 ] || usage
+    run_cli show "$(jarg "$STORE")" "$(jarg "$1")"
+    ;;
+  verify)
+    if [ $# -eq 1 ]; then
+      run_cli verify_one "$(jarg "$STORE")" "$(jarg "$1")"
+    elif [ $# -eq 0 ]; then
+      run_cli verify_all "$(jarg "$STORE")"
+    else
+      usage
+    fi
+    ;;
+  -h|--help|help) usage ;;
+  *) printf 'notebooklab: unknown command %s\n' "$cmd" >&2; usage ;;
+esac

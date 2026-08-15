@@ -1,0 +1,11 @@
+{
+  "attempt": "1",
+  "series": "early-finetune",
+  "trainer": "sidecar/xlerobot_rl_finetune.py",
+  "config": { "timesteps": 30000, "warm_start": true },
+  "results": { "denials": 0, "eval": "not recorded" },
+  "evidence": [],
+  "notes": "Smoke test of the mechanism only; its /tmp artifacts were ephemeral and no trail survives.",
+  "supersedes": "",
+  "created_at": 1750000000003
+}

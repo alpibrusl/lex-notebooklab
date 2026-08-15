@@ -1,0 +1,11 @@
+{
+  "attempt": "4-forged",
+  "series": "usage-informed-finetune",
+  "trainer": "sidecar/xlerobot_rl_finetune.py",
+  "config": { "timesteps": 100000 },
+  "results": { "actions": 16, "denials": 7 },
+  "evidence": [ { "kind": "replay_trail", "path": "fixtures/xlerobot_rl_trail_tampered.jsonl", "sha256": "e6a2b0c7077a1a78c71208e6e3d6b49e7fa2ce7a6c9e24cc8fae19157d0e493e" } ],
+  "notes": "Binds the digest of the real trail but ships an edited one.",
+  "supersedes": "",
+  "created_at": 1750000000002
+}

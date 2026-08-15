@@ -1,0 +1,46 @@
+name: ci
+
+# Gates the repo on what a newcomer does: install the pinned `lex` toolchain,
+# resolve dependencies, then run scripts/smoke.sh — which type-checks every
+# module, checks formatting, runs the test suite, and drives the CLI through
+# its VERIFIED / MISMATCH / TAMPERED exit codes against the committed fixtures.
+#
+# No ML dependencies. The trail fixture is committed, so verification is
+# exercised for real here without gym, mujoco or torch.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    env:
+      # Pinned. The toolchain is the one pin that is always available and
+      # always honoured — see the dependency notes in lex.toml.
+      LEX_VERSION: v0.10.10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install lex toolchain
+        run: |
+          set -euo pipefail
+          tgt=x86_64-unknown-linux-gnu
+          url="https://github.com/alpibrusl/lex-lang/releases/download/${LEX_VERSION}/lex-${LEX_VERSION}-${tgt}.tar.gz"
+          curl -fsSL "$url" -o /tmp/lex.tgz
+          tar -xzf /tmp/lex.tgz -C /tmp
+          sudo install -m 0755 "/tmp/lex-${LEX_VERSION}-${tgt}/lex" /usr/local/bin/lex
+          lex --version
+
+      - name: Install dependencies
+        run: lex pkg install
+
+      # Effects note: everything here declares `io` only. Anything added later
+      # that touches an agent loop or a lex-web route needs `approval` in its
+      # effect row / --allow-effects as of v0.10.10.
+      - name: Smoke (check + fmt + test + CLI exit codes)
+        run: bash scripts/smoke.sh

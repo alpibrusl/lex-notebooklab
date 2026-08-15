@@ -1,0 +1,11 @@
+{
+  "attempt": "4",
+  "series": "usage-informed-finetune",
+  "trainer": "sidecar/xlerobot_rl_finetune.py",
+  "config": { "timesteps": 100000, "warm_start": true, "envs": 4 },
+  "results": { "actions": 16, "denials": 8, "denial_rate_pct": 50, "move_to.x.violations": 8, "move_base.y.violations": 0 },
+  "evidence": [ { "kind": "replay_trail", "path": "fixtures/xlerobot_rl_trail.jsonl", "sha256": "" } ],
+  "notes": "Reference rollout of the 300k PPO policy; every arm reach denied at the grant.",
+  "supersedes": "",
+  "created_at": 1750000000000
+}
