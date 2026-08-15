@@ -7,8 +7,10 @@
 # appears anywhere below.
 #
 # See tools/make_loom_fixture.lex for what this fixture is and is not: the
-# event kinds are loom's real ones, the sequence is authored, and loom does not
-# yet export sprint trails as standalone files.
+# event kinds are loom's real ones and the sequence is authored, because loom's
+# `main` does not yet hand a sprint trail over as a standalone artifact.
+# lex-loom PR #237 adds that export; swap this fixture for a real one when it
+# lands.
 
 import "../src/trail" as trail
 

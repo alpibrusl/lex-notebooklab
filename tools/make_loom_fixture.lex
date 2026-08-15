@@ -5,15 +5,16 @@
 # The event kinds and payload fields below are taken from lex-loom's real
 # `src/loom_trail.lex` (`loom.sprint.started`, `loom.node.denied`,
 # `loom.phase.bounced`, …). The SEQUENCE is a plausible sprint I authored, not
-# a captured one: unlike the robot fixture, there is no committed loom artifact
-# to derive from, because loom writes its trail into a shared, growing SQLite
-# database rather than exporting a per-sprint file.
+# a captured one: unlike the robot fixture, loom's `main` commits no trail
+# artifact to derive from, because it writes into a SQLite database rather
+# than emitting a per-sprint file.
 #
-# That gap is loom's to close — a digest cannot be bound to a file that keeps
-# changing, so loom needs to export a snapshot per sprint (lex-trail's
-# `src/export.lex` already emits an integrity-checked document). Until it does,
-# this fixture proves the DERIVATION is right, and claims nothing about the
-# plumbing that would feed it real sprints.
+# Getting the events out is the only gap, and it is loom's to close — binding
+# is already solved here, since a record commits to the chain's HEAD EVENT ID
+# rather than to any file's bytes. lex-loom PR #237 adds the export and its
+# output verifies unchanged against this deriver; replace this fixture with a
+# real export once that lands. Until then it proves the DERIVATION is right
+# and claims nothing about the plumbing.
 #
 # As with the robot fixture, ids come from lex-trail's own `event.make` — never
 # from a second copy of that hash.

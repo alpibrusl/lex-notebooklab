@@ -65,13 +65,17 @@ reach, and `loom.phase.bounced` counts rework the way overshoot counts
 violation.
 
 **Status of the loom side, stated plainly.** The event kinds it reads are
-loom's real ones. What loom does not yet do is *export* a sprint trail as a
-standalone file — it writes into a shared, growing SQLite database, and a
-digest cannot be bound to a file that keeps changing. Loom needs to emit a
-per-sprint snapshot before real sprints can be recorded here; lex-trail's
-`src/export.lex` already produces an integrity-checked document, so the piece
-exists and needs wiring on loom's side. Until then the deriver is proven
-against a fixture in loom's own event format, and nothing more is claimed.
+loom's real ones. What loom's `main` does not yet do is hand a sprint trail
+over as a standalone artifact — it writes into a SQLite database, which is the
+right home for a running sprint and the wrong thing to give a third party.
+
+That is *not* a binding problem: a record commits to the chain's
+[head event id](#bindings-what-a-record-commits-to), not to any file's bytes,
+so the container is irrelevant and nobody has to keep an immutable file
+around. Only the handover is missing. [lex-loom PR #237](https://github.com/alpibrusl/lex-loom/pull/237)
+adds it, and its output verifies here unchanged; until that merges the deriver
+is proven against a fixture in loom's own event format, and nothing more is
+claimed.
 
 ## The four verdicts
 

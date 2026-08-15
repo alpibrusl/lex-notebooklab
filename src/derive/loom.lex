@@ -25,18 +25,22 @@
 #
 # ── Status, stated plainly ────────────────────────────────────────────────
 # The event kinds and payload fields below are read from loom's real
-# `src/loom_trail.lex`. What loom does NOT yet do is EXPORT that trail as a
-# standalone file: it writes into a shared, growing SQLite database via
-# lex-trail's `log`, and a digest cannot be bound to a file that keeps
-# changing. Before a loom sprint can be recorded as verifiable evidence here,
-# loom needs to export a per-sprint snapshot — lex-trail already ships
-# `src/export.lex`, which emits an integrity-checked document, so the piece
-# exists and just needs wiring up on loom's side.
+# `src/loom_trail.lex`. What loom does not yet do on its `main` is hand that
+# trail over as a standalone artifact — it writes into a SQLite database via
+# lex-trail's `log`, which is the right home for a running sprint and the
+# wrong thing to give a third party.
 #
-# Until then this deriver is exercised against a fixture in loom's own event
-# format (tools/make_loom_fixture.lex). That is honest about what is proven —
-# the interpretation is real and tested; the plumbing that would feed it real
-# sprints is not built yet, and it is not built HERE.
+# Note this is NOT a binding problem any more. Records commit to a trail's
+# HEAD EVENT ID (see src/record.lex `Evidence.trail_head`), which transitively
+# commits to the whole chain, so the container is irrelevant and nobody has to
+# keep an immutable file around. All that is missing is a way to get the
+# events out. lex-loom PR #237 adds exactly that (`loom_trail.export_jsonl`)
+# and its output verifies here unchanged; until it merges, this deriver is
+# exercised against a fixture in loom's own event format
+# (tools/make_loom_fixture.lex).
+#
+# That is honest about what is proven: the interpretation is real and tested,
+# and the plumbing that feeds it real sprints lives in loom, not here.
 #
 # Effects: none.
 
