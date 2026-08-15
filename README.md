@@ -9,6 +9,11 @@ metrics were derived from, and `verify` re-derives those metrics from that
 evidence — so "50% denial rate, y-violations eliminated" is something a third
 party can recompute, not something the logger asserted.
 
+**Status: MVP complete.** Record, store, verify, CLI, HTTP door and importer
+are all built and CI-gated; lex-robot's 12-attempt ledger imports and a
+lex-loom sprint verifies. What is *not* built is signing — see
+[Trust model and limitations](#trust-model-and-limitations).
+
 It is **not a robot tracker**. Anything in the ecosystem that emits a
 lex-trail event chain can be recorded and verified here: today a lex-robot
 governed rollout and a lex-loom sprint, tomorrow whatever comes next. The
@@ -16,12 +21,12 @@ integrity machinery is shared; only the interpretation is per-domain.
 
 ```sh
 $ notebooklab verify
-29229dbd26e2  VERIFIED  (evidence: VERIFIED — digest matches and the hash chain is intact)
-    actions                     VERIFIED
-    denial_rate_pct             VERIFIED
-    denials                     VERIFIED
-    move_base.y.violations      VERIFIED
-    move_to.x.violations        VERIFIED
+c62cc4705155  VERIFIED  (evidence: VERIFIED — trail head matches and the hash chain is intact)
+    actions                           VERIFIED
+    denial_rate_pct                   VERIFIED
+    denials                           VERIFIED
+    move_base.y.violations            VERIFIED
+    move_to.x.violations              VERIFIED
 ```
 
 Those five numbers were not read back from the record. They were recomputed
@@ -418,3 +423,15 @@ come from lex-trail's own `event.make` rather than a second copy of that hash.
 `AGENTS.md` is the verbatim output of `lex agent-guidelines` — the authoritative
 contract for writing Lex in this ecosystem. Do not edit it; regenerate it.
 Narrow effects, `examples {}` on pure functions, stdlib first.
+
+## License
+
+[EUPL-1.2](LICENSE) — the European Union Public Licence, the same licence the
+rest of the Lex ecosystem uses. It is a copyleft licence approved by the
+European Commission and compatible with GPL-2.0/3.0, AGPL-3.0, LGPL-2.1/3.0,
+MPL-2.0, EPL-1.0, CeCILL-2.0/2.1, OSL-2.1/3.0 and CC-BY-SA-3.0 (see the
+licence Appendix).
+
+`fixtures/lex_robot_experiments.jsonl` is a copy of
+[lex-robot](https://github.com/alpibrusl/lex-robot)'s `docs/experiments.jsonl`,
+which carries the same licence.
