@@ -191,7 +191,7 @@ fn verdict_json(v :: vfy.RunVerdict) -> Str {
 fn print_verdict(v :: vfy.RunVerdict) -> [io] Unit {
   let __h := io.print(str.join([short_id(v.run_id), "  ", vfy.status_str(vfy.overall(v)), "  (evidence: ", vfy.status_str(v.trail_status), " — ", v.trail_detail, ")"], ""))
   let __rows := list.map(v.claims, fn (c :: vfy.ClaimVerdict) -> [io] Unit {
-    io.print(str.join(["    ", pad(c.key, 28), pad(vfy.status_str(c.status), 14), if c.status == Mismatch {
+    io.print(str.join(["    ", pad(c.key, 34), pad(vfy.status_str(c.status), 14), if c.status == Mismatch {
       str.join(["claimed ", c.claimed, ", derived ", c.derived], "")
     } else {
       c.detail

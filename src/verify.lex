@@ -40,6 +40,10 @@ import "./record" as rec
 
 import "./trail" as tr
 
+import "./derive" as derive
+
+import "./metric" as met
+
 type Status = Verified | Mismatch | Unverifiable | Tampered
 
 type ClaimVerdict = { key :: Str, status :: Status, claimed :: Str, derived :: Str, detail :: Str }
@@ -131,126 +135,18 @@ fn claims_of(results_json :: Str) -> List[RawClaim] {
   list.concat(numeric_claims(results_json), string_claims(results_json))
 }
 
-# ---- Derived lookup ------------------------------------------------------
-# Maps a claim key onto the quantity this verifier can recompute. Returning
-# None is meaningful: it is the difference between "wrong" and "not something
-# evidence can settle".
-#
-# Scalar keys name whole-trail quantities. Per-axis keys are
-# `<skill>.<axis>.<metric>`, e.g. `move_to.x.violations` — the same naming
-# gym_env/xlerobot_usage_log.py prints.
-fn derived_value(d :: tr.Derived, key :: Str) -> Option[Int] {
-  if key == "actions" {
-    Some(d.actions)
-  } else {
-    if key == "actions_all" {
-      Some(d.actions_all)
-    } else {
-      if key == "denials" {
-        Some(d.denials)
-      } else {
-        if key == "denial_rate_pct" {
-          Some(d.denial_rate_pct)
-        } else {
-          axis_metric(d.axes, key)
-        }
-      }
-    }
-  }
-}
-
-fn axis_key(s :: tr.AxisStat, metric :: Str) -> Str
-  examples {
-    axis_key({ skill: "move_to", axis: "x", violations: 1, mean_overshoot_milli: 2, max_overshoot_milli: 3 }, "violations") => "move_to.x.violations"
-  }
-{
-  str.join([s.skill, ".", s.axis, ".", metric], "")
-}
-
-fn axis_metric_of(s :: tr.AxisStat, metric :: Str) -> Option[Int]
-  examples {
-    axis_metric_of({ skill: "m", axis: "x", violations: 1, mean_overshoot_milli: 2, max_overshoot_milli: 3 }, "violations") => Some(1),
-    axis_metric_of({ skill: "m", axis: "x", violations: 1, mean_overshoot_milli: 2, max_overshoot_milli: 3 }, "mean_overshoot_milli") => Some(2),
-    axis_metric_of({ skill: "m", axis: "x", violations: 1, mean_overshoot_milli: 2, max_overshoot_milli: 3 }, "max_overshoot_milli") => Some(3),
-    axis_metric_of({ skill: "m", axis: "x", violations: 1, mean_overshoot_milli: 2, max_overshoot_milli: 3 }, "nope") => None
-  }
-{
-  if metric == "violations" {
-    Some(s.violations)
-  } else {
-    if metric == "mean_overshoot_milli" {
-      Some(s.mean_overshoot_milli)
-    } else {
-      if metric == "max_overshoot_milli" {
-        Some(s.max_overshoot_milli)
-      } else {
-        None
-      }
-    }
-  }
-}
-
-# An axis that recorded no violations is absent from `axes`, so a claim of
-# `move_to.y.violations: 0` must resolve to Some(0) rather than None —
-# "y violations eliminated" is exactly the claim this package exists to
-# settle, and reporting it UNVERIFIABLE would be the wrong answer.
-fn axis_metric(axes :: List[tr.AxisStat], key :: Str) -> Option[Int] {
-  let parts := str.split(key, ".")
-  if not (list.len(parts) == 3) {
-    None
-  } else {
-    let metric := last_part(parts)
-    match list.head(list.filter(axes, fn (s :: tr.AxisStat) -> Bool {
-      axis_key(s, metric) == key
-    })) {
-      Some(s) => axis_metric_of(s, metric),
-      None => if is_axis_shaped(parts) and is_known_metric(metric) {
-        Some(0)
-      } else {
-        None
-      },
-    }
-  }
-}
-
-fn last_part(parts :: List[Str]) -> Str
-  examples {
-    last_part([]) => "",
-    last_part(["a", "b", "c"]) => "c"
-  }
-{
-  match list.head(list.reverse(parts)) {
-    None => "",
-    Some(s) => s,
-  }
-}
-
-fn is_known_metric(metric :: Str) -> Bool
-  examples {
-    is_known_metric("violations") => true,
-    is_known_metric("mean_overshoot_milli") => true,
-    is_known_metric("max_overshoot_milli") => true,
-    is_known_metric("elephants") => false
-  }
-{
-  metric == "violations" or (metric == "mean_overshoot_milli" or metric == "max_overshoot_milli")
-}
-
-# A `<skill>.<axis>.<metric>` key only names a real axis if the middle part is
-# one of the axes the grant actually bounds.
-fn is_axis_shaped(parts :: List[Str]) -> Bool {
-  match list.head(list.tail(parts)) {
-    None => false,
-    Some(axis) => axis == "x" or (axis == "y" or axis == "z"),
-  }
-}
-
 # ---- Claim scoring -------------------------------------------------------
+# Claim keys are resolved against whatever the deriver for this evidence kind
+# published (src/derive.lex). A missing key means "no deriver produced this",
+# which is the difference between a claim being WRONG and a claim being
+# something evidence cannot settle. A deriver that knows a quantity is
+# genuinely zero emits it explicitly, so a claim of `move_base.y.violations: 0`
+# resolves to 0 rather than to "cannot say".
 fn unverifiable(key :: Str, claimed :: Str, detail :: Str) -> ClaimVerdict {
   { key: key, status: Unverifiable, claimed: claimed, derived: "", detail: detail }
 }
 
-fn score_claim(d :: tr.Derived, c :: RawClaim) -> ClaimVerdict {
+fn score_claim(ms :: List[met.Metric], c :: RawClaim) -> ClaimVerdict {
   if not c.numeric {
     unverifiable(c.key, c.value, "claim is not a numeric metric; no trail derivation exists for it")
   } else {
@@ -259,7 +155,7 @@ fn score_claim(d :: tr.Derived, c :: RawClaim) -> ClaimVerdict {
     } else {
       match str.to_int(c.value) {
         None => unverifiable(c.key, c.value, "claim is not an integer"),
-        Some(claimed) => match derived_value(d, c.key) {
+        Some(claimed) => match met.lookup(ms, c.key) {
           None => unverifiable(c.key, c.value, "no derivation for this key; the trail cannot settle it"),
           Some(derived) => if claimed == derived {
             { key: c.key, status: Verified, claimed: c.value, derived: int.to_str(derived), detail: "" }
@@ -272,9 +168,9 @@ fn score_claim(d :: tr.Derived, c :: RawClaim) -> ClaimVerdict {
   }
 }
 
-fn score_all(d :: tr.Derived, results_json :: Str) -> List[ClaimVerdict] {
+fn score_all(ms :: List[met.Metric], results_json :: Str) -> List[ClaimVerdict] {
   list.map(claims_of(results_json), fn (c :: RawClaim) -> ClaimVerdict {
-    score_claim(d, c)
+    score_claim(ms, c)
   })
 }
 
@@ -291,20 +187,35 @@ fn verdict(run_id :: Str, s :: Status, detail :: Str, claims :: List[ClaimVerdic
   { run_id: run_id, trail_status: s, trail_detail: detail, claims: claims }
 }
 
-# Verify one record against the evidence it bound.
+# Verify one record against the evidence it bound. Domain-neutral: the
+# evidence `kind` selects the deriver, and everything below it — digest
+# binding, chain integrity, the four verdicts — is shared by every domain.
 #
 # The order of checks is the point: identity of the evidence is settled BEFORE
 # anything is derived from it. A trail whose digest does not match the one the
 # record committed to is not weak evidence, it is repudiated evidence — the
 # same stance lex-games' referee takes when it disqualifies a forged trail
 # instead of scoring it.
+# The first bound artifact this package knows how to interpret. A run may bind
+# several (a trail, a checkpoint hash, …); only some kinds have a deriver, and
+# a checkpoint digest settles no claim on its own.
+fn derivable_evidence(es :: List[rec.Evidence]) -> Option[rec.Evidence] {
+  list.head(list.filter(es, fn (e :: rec.Evidence) -> Bool {
+    derive.has_deriver(e.kind)
+  }))
+}
+
+fn no_evidence_detail(r :: rec.Run) -> Str {
+  if not rec.has_evidence(r) {
+    "no evidence bound to this run"
+  } else {
+    "no evidence of a kind this package can interpret; see derive.known_kinds()"
+  }
+}
+
 fn verify_run(r :: rec.Run) -> [io] RunVerdict {
-  match rec.evidence_of_kind(r.evidence, "replay_trail") {
-    None => verdict(r.run_id, Unverifiable, if rec.has_evidence(r) {
-      "no evidence of kind 'replay_trail' bound to this run"
-    } else {
-      "no evidence bound to this run"
-    }, all_claims_as(r.results_json, Unverifiable, "no replay trail to derive from")),
+  match derivable_evidence(r.evidence) {
+    None => verdict(r.run_id, Unverifiable, no_evidence_detail(r), all_claims_as(r.results_json, Unverifiable, "no interpretable evidence to derive from")),
     Some(e) => match io.read(e.path) {
       Err(msg) => verdict(r.run_id, Unverifiable, str.join(["evidence file unreadable: ", e.path, " (", msg, ")"], ""), all_claims_as(r.results_json, Unverifiable, "evidence file missing")),
       Ok(content) => verify_content(r, e, content),
@@ -322,9 +233,9 @@ fn verify_content(r :: rec.Run, e :: rec.Evidence, content :: Str) -> RunVerdict
       Ok(lines) => if not tr.trail_intact(lines) {
         verdict(r.run_id, Tampered, "trail hash chain is broken: an event id does not recompute, or a parent link is wrong", all_claims_as(r.results_json, Tampered, "evidence repudiated; claim not scored"))
       } else {
-        match tr.derive(lines) {
-          Err(msg) => verdict(r.run_id, Tampered, str.concat("trail intact but an action payload is malformed: ", msg), all_claims_as(r.results_json, Tampered, "evidence unusable; claim not scored")),
-          Ok(d) => verdict(r.run_id, Verified, "evidence digest matches and the hash chain is intact", score_all(d, r.results_json)),
+        match derive.metrics(e.kind, lines) {
+          Err(msg) => verdict(r.run_id, Tampered, str.join(["trail intact but a ", e.kind, " payload is malformed: ", msg], ""), all_claims_as(r.results_json, Tampered, "evidence unusable; claim not scored")),
+          Ok(ms) => verdict(r.run_id, Verified, "evidence digest matches and the hash chain is intact", score_all(ms, r.results_json)),
         }
       },
     }

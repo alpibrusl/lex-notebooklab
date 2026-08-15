@@ -9,6 +9,11 @@ metrics were derived from, and `verify` re-derives those metrics from that
 evidence — so "50% denial rate, y-violations eliminated" is something a third
 party can recompute, not something the logger asserted.
 
+It is **not a robot tracker**. Anything in the ecosystem that emits a
+lex-trail event chain can be recorded and verified here: today a lex-robot
+governed rollout and a lex-loom sprint, tomorrow whatever comes next. The
+integrity machinery is shared; only the interpretation is per-domain.
+
 ```sh
 $ notebooklab verify
 29229dbd26e2  VERIFIED  (evidence: VERIFIED — digest matches and the hash chain is intact)
@@ -32,6 +37,42 @@ The durable store is git. And none of those tools can re-derive a claim from a
 tamper-evident trail, which is the capability this ecosystem is uniquely
 positioned to provide.
 
+## One verifier, many domains
+
+Verification splits in two, and the split is the whole design:
+
+- **Shared, and security-critical.** Is this a well-formed lex-trail? Does
+  every event id recompute? Does every `parent` link hold? Does the file's
+  digest match what the record committed to? None of this knows or cares what
+  the events mean, so it is written once and reused verbatim.
+- **Per-domain, and small.** What do these events MEAN? That lives in
+  `src/derive/`, one module per evidence kind, each publishing a flat list of
+  named integers. `src/verify.lex` only ever looks a key up and diffs it.
+
+A run's evidence entries already carry a `kind`, and that kind selects the
+deriver. Adding a domain is a new module under `src/derive/` plus one arm in
+`src/derive.lex` — nothing in the record, the store, the verifier or the CLI
+changes.
+
+| Evidence kind | Deriver | Publishes |
+|---|---|---|
+| `replay_trail` | `src/derive/robot.lex` | `actions`, `denials`, `denial_rate_pct`, `<skill>.<axis>.violations` / `.mean_overshoot_milli` / `.max_overshoot_milli` |
+| `loom_sprint_trail` | `src/derive/loom.lex` | `nodes_started`, `nodes_accepted`, `nodes_denied`, `denial_rate_pct`, `bounces`, `graph_rejections`, `phases_advanced`, `sprint_success`, `fully_sealed`, `gate.<gate>.denials`, `phase.<phase>.bounces` |
+
+The two domains are more alike than they look: loom's `loom.node.denied` is a
+gate refusing an artifact exactly as the robot's grant refuses an out-of-box
+reach, and `loom.phase.bounced` counts rework the way overshoot counts
+violation.
+
+**Status of the loom side, stated plainly.** The event kinds it reads are
+loom's real ones. What loom does not yet do is *export* a sprint trail as a
+standalone file — it writes into a shared, growing SQLite database, and a
+digest cannot be bound to a file that keeps changing. Loom needs to emit a
+per-sprint snapshot before real sprints can be recorded here; lex-trail's
+`src/export.lex` already produces an integrity-checked document, so the piece
+exists and needs wiring on loom's side. Until then the deriver is proven
+against a fixture in loom's own event format, and nothing more is claimed.
+
 ## The four verdicts
 
 Collapsing verification to pass/fail would let very different failures look
@@ -40,7 +81,7 @@ alike, so the vocabulary is four-valued:
 | Verdict | Meaning | Exit code |
 |---|---|---|
 | `VERIFIED` | Recomputed from the trail and equal to the claim. | 0 |
-| `UNVERIFIABLE` | Nothing to check against — no evidence bound, file missing, or the claim names a quantity no trail can settle. | 0 |
+| `UNVERIFIABLE` | Nothing to check against — no evidence bound, no evidence of a kind any deriver understands, file missing, or the claim names a quantity no trail can settle. | 0 |
 | `MISMATCH` | Recomputed and **not** equal. The claim is wrong. | 3 |
 | `TAMPERED` | The evidence itself does not hold up: its digest differs from the one recorded, or its hash chain is broken. No claim is scored. | 4 |
 
@@ -76,7 +117,9 @@ process exit status.
 A record's `results` map is **claims**; its `evidence` list is what those
 claims are checked against.
 
-1. Find the `replay_trail` evidence. No evidence → every claim `UNVERIFIABLE`.
+1. Find the first bound artifact some deriver understands. None → every claim
+   `UNVERIFIABLE`. (A checkpoint digest is legitimate evidence to record but
+   settles no claim on its own, so it has no deriver.)
 2. Hash the file and compare against the digest the record committed to. A
    mismatch is `TAMPERED` — repudiated evidence, not weak evidence — and
    nothing is derived from it. Same stance lex-games' referee takes when it
@@ -85,7 +128,8 @@ claims are checked against.
    `lex-trail`'s `event.compute_id`) and every `parent` must be the previous
    event's id. This catches an edit, a reorder, an insertion or a deletion —
    including one where the forger refreshed the recorded digest to match.
-4. Derive the metrics and diff them against each claim.
+4. Hand the events to the deriver for that evidence kind, and diff what it
+   publishes against each claim.
 
 **Bounds come from the grant recorded in the trail**, not from constants in the
 verifier. lex-robot's `gym_env/xlerobot_usage_log.py` hardcodes `ARM_BOUNDS` /
@@ -94,9 +138,9 @@ the grant. The trail already carries the grant each action was checked against,
 so reading it there is correct by construction and lets a third party verify a
 run whose grant differed.
 
-### The claim vocabulary
+### The claim vocabulary — `replay_trail`
 
-Keys in `results` that the verifier can re-derive:
+Each deriver publishes its own keys; these are the robot deriver's:
 
 | Key | Meaning |
 |---|---|
@@ -104,14 +148,16 @@ Keys in `results` that the verifier can re-derive:
 | `actions_all` | Every `execute` event — what the lex-games referee counts. |
 | `denials` | Actions the grant denied. |
 | `denial_rate_pct` | `denials / actions`, integer percent. |
-| `<skill>.<axis>.violations` | e.g. `move_to.x.violations`. A claim of `0` on an axis with no violations resolves to `0`, not "cannot say". |
+| `<skill>.<axis>.violations` | e.g. `move_to.x.violations`. Emitted for every axis the trail exercised, so a claim of `0` on a clean axis resolves to `0`, not "cannot say" — which is exactly the "y-violations eliminated" claim. |
 | `<skill>.<axis>.mean_overshoot_milli` | Mean overshoot past the granted bound, milli-units. |
 | `<skill>.<axis>.max_overshoot_milli` | Worst overshoot, milli-units. |
 
-Everything is integer milli-units, exactly as the trail encodes them (`x: 499`
-means 0.499 m), so two verifiers always agree bit for bit. Any other key — a
-string like `"eval": "FAILED"`, or a fractional value — is reported
-`UNVERIFIABLE` with a reason. A MuJoCo SUCCESS/FAILED verdict has no trail
+Distances are integer milli-units, exactly as the trail encodes them
+(`x: 499` means 0.499 m); everything else is a plain count. Integers
+throughout, so two verifiers always agree bit for bit with no rounding policy
+to argue about. Any key no deriver published — a string like
+`"eval": "FAILED"`, or a fractional value — is reported `UNVERIFIABLE` with a
+reason. A MuJoCo SUCCESS/FAILED verdict has no trail
 representation, and inventing a check for it would be worse than admitting it.
 
 ## Dependency pinning — measured, not assumed
@@ -198,15 +244,22 @@ delete `tools/make_fixture.lex` and the fixture and use the real one.
 ## Layout
 
 ```
-src/record.lex   run record, canonical encoding, content address   (#3)
-src/store.lex    append-only JSONL store                            (#3)
-src/trail.lex    trail parsing, hash chain, metric derivation       (#4)
-src/verify.lex   claims vs evidence, the four verdicts              (#4)
-src/cli.lex      record / list / show / verify, acli envelopes      (#5)
-bin/notebooklab  exit-code wrapper around `lex run`                 (#5)
-tools/           fixture generation
-fixtures/        the reference trail, its tampered twin, entries
+src/record.lex      run record, canonical encoding, content address  (#3)
+src/store.lex       append-only JSONL store                          (#3)
+src/trail.lex       trail parsing + hash chain — domain-neutral      (#4)
+src/metric.lex      the deriver/verifier interface: named integers   (#4)
+src/derive.lex      evidence kind -> deriver dispatch                (#4)
+src/derive/robot.lex  lex-robot governed rollouts                    (#4)
+src/derive/loom.lex   lex-loom sprint trails                         (#4)
+src/verify.lex      claims vs evidence, the four verdicts            (#4)
+src/cli.lex         record / list / show / verify, acli envelopes    (#5)
+bin/notebooklab     exit-code wrapper around `lex run`               (#5)
+tools/              fixture generation, in Lex
+fixtures/           reference trails, a tampered twin, entries
 ```
+
+No Python anywhere, deliberately: the fixture generators are Lex so event ids
+come from lex-trail's own `event.make` rather than a second copy of that hash.
 
 ## Conventions
 

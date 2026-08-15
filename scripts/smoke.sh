@@ -44,6 +44,15 @@ say "verify: true claims + an evidence-less run (expect 0)"
 ./bin/notebooklab verify
 echo "ok: exit 0"
 
+# A loom sprint trail — a completely different event vocabulary — through the
+# same store, the same integrity checks and the same CLI. This is the check
+# that the package is an experiment tracker, not a robot tracker.
+say "verify: a loom sprint trail (expect 0)"
+LOOM_STORE="$(mktemp -d)/runs.jsonl"
+./bin/notebooklab --store "$LOOM_STORE" record fixtures/entry_loom_sprint.json >/dev/null
+./bin/notebooklab --store "$LOOM_STORE" verify
+echo "ok: exit 0"
+
 say "verify: a claim the trail contradicts (expect 3)"
 MISMATCH_STORE="$(mktemp -d)/runs.jsonl"
 ./bin/notebooklab --store "$MISMATCH_STORE" record fixtures/entry_mismatch.json >/dev/null
@@ -70,9 +79,14 @@ if [ -f ../lex-robot/examples/fixtures/xlerobot_rl_rollout.json ]; then
   lex run --allow-effects io tools/make_fixture.lex build \
     '"../lex-robot/examples/fixtures/xlerobot_rl_rollout.json"' "\"$TMP_TRAIL\"" >/dev/null
   diff -q "$TMP_TRAIL" fixtures/xlerobot_rl_trail.jsonl \
-    && echo "ok: regenerated fixture is byte-identical"
+    && echo "ok: regenerated robot fixture is byte-identical"
 else
   echo "skip: lex-robot checkout not alongside this repo"
 fi
+
+TMP_LOOM="$(mktemp -d)/loom.jsonl"
+lex run --allow-effects io tools/make_loom_fixture.lex build "\"$TMP_LOOM\"" >/dev/null
+diff -q "$TMP_LOOM" fixtures/loom_sprint_trail.jsonl \
+  && echo "ok: regenerated loom fixture is byte-identical"
 
 printf '\nsmoke: all green\n'
