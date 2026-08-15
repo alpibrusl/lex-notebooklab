@@ -101,4 +101,7 @@ lex run --allow-effects io tools/make_loom_fixture.lex build "\"$TMP_LOOM\"" >/d
 diff -q "$TMP_LOOM" fixtures/loom_sprint_trail.jsonl \
   && echo "ok: regenerated loom fixture is byte-identical"
 
+say "http door (issue #6)"
+bash scripts/smoke_http.sh
+
 printf '\nsmoke: all green\n'

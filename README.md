@@ -204,6 +204,68 @@ to argue about. Any key no deriver published — a string like
 reason. A MuJoCo SUCCESS/FAILED verdict has no trail
 representation, and inventing a check for it would be worse than admitting it.
 
+## The HTTP door
+
+For when the run happens somewhere this package cannot reach — sb3/PyTorch on
+another machine, a CI job, anything that is not already a Lex program. A Lex
+caller should use `src/entry.lex` directly; there is no reason to cross a
+socket to reach a library in the same runtime.
+
+```sh
+NOTEBOOKLAB_STORE=runs.jsonl lex run \
+  --allow-effects approval,concurrent,crypto,env,fs_read,fs_write,io,llm,net,proc,random,sql,time \
+  src/server.lex main
+```
+
+| Route | Behaviour |
+|---|---|
+| `POST /runs` | Submit a run record. `201` + `run_id`, or `400` with a structured error body. |
+| `GET /runs` | Summaries of every stored run. |
+| `GET /runs/{id}` | One full record, or `404`. |
+| `POST /runs/{id}/verify` | Re-derive the claims. Always `200` when the run exists — a MISMATCH is a successful verification that returned bad news. The body carries the verdict and the exit code the CLI would have used. |
+| `GET /health` | Liveness. |
+
+Submission goes through the same `entry.ingest` the CLI uses, so a run
+submitted here and on the command line validate identically and land on the
+**same `run_id`** — it is a content address, so re-POSTing a run is idempotent
+rather than a duplicate. Everything that can fail does so before the append,
+so a rejected POST leaves nothing behind; `scripts/smoke_http.sh` asserts that
+rather than trusting it.
+
+### Logging a run from Python, with no new dependency
+
+The point of the door: `urllib` is in the standard library, so a trainer takes
+on nothing to use it.
+
+```python
+import json, urllib.request
+
+def log_run(entry, base="http://localhost:8137"):
+    req = urllib.request.Request(
+        f"{base}/runs",
+        data=json.dumps(entry).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req) as r:
+        return json.loads(r.read())["run_id"]
+
+run_id = log_run({
+    "attempt": "4", "series": "usage-informed-finetune",
+    "trainer": "sidecar/xlerobot_rl_finetune.py",
+    "config": {"timesteps": 100_000},
+    "results": {"actions": 16, "denials": 8, "denial_rate_pct": 50},
+    # sha256/trail_head are computed server-side when left empty
+    "evidence": [{"kind": "replay_trail", "path": "trail.jsonl",
+                  "sha256": "", "trail_head": ""}],
+    "notes": "", "supersedes": "", "created_at": 1750000000000,
+})
+```
+
+Evidence paths are resolved **server-side**, so the trail must be readable by
+the server — the same filesystem, or a shared mount. Shipping trail bytes in
+the request body is the obvious next step and is not implemented.
+
 ## Dependency pinning — measured, not assumed
 
 Issue #2 left this open after lex-robot lost two CI days to unpinned
@@ -247,7 +309,9 @@ one pin that is always available and always honoured.
 Stated plainly, in the spirit of lex-robot's fleet arbiter documenting its own:
 
 - **Single operator.** No auth, no multi-tenancy. Anyone who can write the
-  store can append to it.
+  store can append to it — and with the HTTP door running, anyone who can
+  reach the port can too. There is no TLS; reverse-proxy it if it leaves
+  localhost. Both are deliberate non-goals of #6, not oversights.
 - **The store is append-only by API, not by syscall.** `std.io` offers `read`
   and `write` but no `O_APPEND`, so `append` is read-modify-write: not atomic,
   and two concurrent writers can lose a record. Fine for a lab tool; the first
@@ -296,7 +360,9 @@ src/derive.lex      evidence kind -> deriver dispatch                (#4)
 src/derive/robot.lex  lex-robot governed rollouts                    (#4)
 src/derive/loom.lex   lex-loom sprint trails                         (#4)
 src/verify.lex      claims vs evidence, the four verdicts            (#4)
+src/entry.lex       submit -> validate -> bind evidence -> append    (#3)
 src/cli.lex         record / list / show / verify, acli envelopes    (#5)
+src/server.lex      HTTP door over lex-web                           (#6)
 bin/notebooklab     exit-code wrapper around `lex run`               (#5)
 tools/              fixture generation, in Lex
 fixtures/           reference trails, a tampered twin, entries

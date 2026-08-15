@@ -25,28 +25,13 @@ import "std.int" as int
 
 import "std.list" as list
 
-import "std.json" as json
-
-import "std.crypto" as crypto
-
 import "./record" as rec
 
 import "./store" as store
 
 import "./verify" as vfy
 
-import "./trail" as tr
-
-import "./derive" as derive
-
-# The JSON a client hands to `record`. `config` and `results` are open maps,
-# held as opaque `Json` on the parse side and normalised into canonical
-# strings by `rec.build`.
-type EntryInput = { attempt :: Str, series :: Str, trainer :: Str, config :: Json, results :: Json, evidence :: List[rec.Evidence], notes :: Str, supersedes :: Str, created_at :: Int }
-
-fn required_fields() -> List[Str] {
-  ["attempt", "series", "trainer", "config", "results", "evidence", "notes", "supersedes", "created_at"]
-}
+import "./entry" as entry
 
 # ---- Envelopes -----------------------------------------------------------
 fn envelope(ok :: Bool, command :: Str, exit_code :: Int, data_json :: Str) -> Str {
@@ -70,77 +55,16 @@ fn emit(s :: Str, code :: Int) -> [io] Int {
 }
 
 # ---- record --------------------------------------------------------------
-# Evidence entries may be submitted with an empty `sha256`; the digest is then
-# computed here from the file itself. That is a convenience, not a shortcut:
-# the hash is still taken over the actual bytes, and an entry that names a file
-# which cannot be read is rejected rather than recorded with a blank binding.
-# For a trail, the preferred binding is the chain head rather than the bytes:
-# it commits to the same events while leaving the producer free to move or
-# re-serialize the artifact. `record` fills it in for any evidence kind that
-# has a deriver, unless the submitter pinned one explicitly.
-#
-# Recording is where a broken chain should be caught, not months later at
-# verify time — so a trail that fails its own integrity check is REJECTED here
-# rather than stored with a binding to nonsense.
-fn bind_trail_head(e :: rec.Evidence, content :: Str) -> Result[rec.Evidence, Str] {
-  if not (str.is_empty(e.trail_head) and derive.has_deriver(e.kind)) {
-    Ok(e)
-  } else {
-    match tr.parse_jsonl(content) {
-      Err(msg) => Err(str.join(["evidence ", e.path, " is not a readable trail: ", msg], "")),
-      Ok(lines) => if not tr.trail_intact(lines) {
-        Err(str.join(["refusing to record ", e.path, ": its hash chain is already broken"], ""))
-      } else {
-        Ok({ kind: e.kind, path: e.path, sha256: e.sha256, trail_head: tr.head_id(lines) })
-      },
-    }
-  }
-}
-
-fn hash_evidence(e :: rec.Evidence) -> [io] Result[rec.Evidence, Str] {
-  match io.read(e.path) {
-    Err(msg) => Err(str.join(["cannot read evidence ", e.path, ": ", msg], "")),
-    Ok(content) => {
-      let with_digest := if str.is_empty(e.sha256) and not derive.has_deriver(e.kind) {
-        { kind: e.kind, path: e.path, sha256: crypto.sha256_str(content), trail_head: e.trail_head }
-      } else {
-        e
-      }
-      bind_trail_head(with_digest, content)
-    },
-  }
-}
-
-fn hash_all_evidence(es :: List[rec.Evidence]) -> [io] Result[List[rec.Evidence], Str] {
-  list.fold(es, Ok([]), fn (acc :: Result[List[rec.Evidence], Str], e :: rec.Evidence) -> [io] Result[List[rec.Evidence], Str] {
-    match acc {
-      Err(msg) => Err(msg),
-      Ok(done) => match hash_evidence(e) {
-        Err(msg) => Err(msg),
-        Ok(h) => Ok(list.concat(done, [h])),
-      },
-    }
-  })
-}
-
+# The submission path itself lives in src/entry.lex, shared with the HTTP
+# door, so a run submitted here and the same run submitted over HTTP get
+# identical validation, identical evidence bindings and — because `run_id` is
+# a content address — the same id.
 fn record(store_path :: Str, entry_path :: Str) -> [io] Int {
   match io.read(entry_path) {
     Err(msg) => emit(err_envelope("record", 2, str.join(["cannot read entry ", entry_path, ": ", msg], "")), 2),
-    Ok(content) => {
-      let parsed :: Result[EntryInput, Str] := json.parse_strict(content, required_fields())
-      match parsed {
-        Err(msg) => emit(err_envelope("record", 2, str.concat("invalid entry: ", msg)), 2),
-        Ok(input) => match hash_all_evidence(input.evidence) {
-          Err(msg) => emit(err_envelope("record", 2, msg), 2),
-          Ok(evidence) => match rec.build(input.attempt, input.series, input.trainer, json.stringify(input.config), json.stringify(input.results), evidence, input.notes, input.supersedes, input.created_at) {
-            Err(msg) => emit(err_envelope("record", 2, msg), 2),
-            Ok(built) => match store.append(store_path, built) {
-              Err(msg) => emit(err_envelope("record", 2, msg), 2),
-              Ok(saved) => emit(envelope(true, "record", 0, str.join(["{\"run_id\":", rec.quoted(saved.run_id), ",\"store\":", rec.quoted(store_path), "}"], "")), 0),
-            },
-          },
-        },
-      }
+    Ok(content) => match entry.ingest(store_path, content) {
+      Err(msg) => emit(err_envelope("record", 2, msg), 2),
+      Ok(saved) => emit(envelope(true, "record", 0, str.join(["{\"run_id\":", rec.quoted(saved.run_id), ",\"store\":", rec.quoted(store_path), "}"], "")), 0),
     },
   }
 }

@@ -45,3 +45,5 @@ description = "Verifiable experiment tracking — a run is a trail, not a score"
 lex-trail  = { git = "https://github.com/alpibrusl/lex-trail", rev = "aad817037119bf7b5ea453dfaeff5fc18cc23d6f" }
 # Record validation (issue #3). Unpinned by force — see the note above.
 lex-schema = { git = "https://github.com/alpibrusl/lex-schema" }
+# HTTP door (issue #6). Unpinned by force — see the note above.
+lex-web    = { git = "https://github.com/alpibrusl/lex-web" }

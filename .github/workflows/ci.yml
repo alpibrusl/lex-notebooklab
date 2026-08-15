@@ -39,8 +39,13 @@ jobs:
       - name: Install dependencies
         run: lex pkg install
 
-      # Effects note: everything here declares `io` only. Anything added later
-      # that touches an agent loop or a lex-web route needs `approval` in its
-      # effect row / --allow-effects as of v0.10.10.
+      # Effects note: the CLI path declares `io` only. The HTTP door does not
+      # get that choice — lex-web pins its handler effect row, and rows unify
+      # by equality, so `llm`, `proc` and (as of v0.10.10) `approval`
+      # propagate out to the socket loop even though no handler uses them.
+      # See the header of src/server.lex.
+      #
+      # The door's smoke test needs python3, which ubuntu-latest ships. It
+      # uses the standard library only — that is the property under test.
       - name: Smoke (check + fmt + test + CLI exit codes)
         run: bash scripts/smoke.sh
