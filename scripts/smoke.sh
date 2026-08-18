@@ -53,6 +53,40 @@ LOOM_STORE="$(mktemp -d)/runs.jsonl"
 ./bin/notebooklab --store "$LOOM_STORE" verify
 echo "ok: exit 0"
 
+# Evidence that is SIGNED rather than chained, through the same store, the
+# same CLI and the same four verdicts. A parity attestation has no hash chain
+# to walk; its integrity — and, unlike a trail, its provenance — comes from an
+# ed25519 signature over the exact bytes it was serialized to.
+say "verify: a signed lex-moe parity attestation (expect 0)"
+MOE_STORE="$(mktemp -d)/runs.jsonl"
+./bin/notebooklab --store "$MOE_STORE" record fixtures/entry_moe_parity.json >/dev/null
+./bin/notebooklab --store "$MOE_STORE" verify | grep -q "signature verifies" \
+  || { echo "FAIL: the verdict did not report a checked signature" >&2; exit 1; }
+./bin/notebooklab --store "$MOE_STORE" verify >/dev/null
+echo "ok: exit 0"
+
+say "verify: a ledger entry the signed statement contradicts (expect 3)"
+MOE_MISMATCH_STORE="$(mktemp -d)/runs.jsonl"
+./bin/notebooklab --store "$MOE_MISMATCH_STORE" record fixtures/entry_moe_mismatch.json >/dev/null
+set +e
+./bin/notebooklab --store "$MOE_MISMATCH_STORE" verify
+code=$?
+set -e
+[ "$code" -eq 3 ] || { echo "FAIL: expected exit 3 (MISMATCH), got $code" >&2; exit 1; }
+echo "ok: exit 3"
+
+# The signed analogue of "refusing to record a broken chain": a statement
+# improved after signing is caught at SUBMISSION, not months later.
+say "record: an envelope edited after signing is refused"
+MOE_EDIT_STORE="$(mktemp -d)/runs.jsonl"
+set +e
+./bin/notebooklab --store "$MOE_EDIT_STORE" record fixtures/entry_moe_edited.json
+code=$?
+set -e
+[ "$code" -eq 2 ] || { echo "FAIL: expected exit 2 (rejected), got $code" >&2; exit 1; }
+[ -s "$MOE_EDIT_STORE" ] && { echo "FAIL: a rejected submission wrote to the store" >&2; exit 1; }
+echo "ok: refused, and wrote nothing"
+
 say "verify: a claim the trail contradicts (expect 3)"
 MISMATCH_STORE="$(mktemp -d)/runs.jsonl"
 ./bin/notebooklab --store "$MISMATCH_STORE" record fixtures/entry_mismatch.json >/dev/null

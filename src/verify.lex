@@ -42,6 +42,8 @@ import "./trail" as tr
 
 import "./derive" as derive
 
+import "./attest" as attest
+
 import "./metric" as met
 
 type Status = Verified | Mismatch | Unverifiable | Tampered
@@ -266,7 +268,12 @@ fn check_head(e :: rec.Evidence, lines :: List[tr.Line]) -> Result[Unit, Str] {
 }
 
 # What the run is actually standing on, for the verdict line — worth naming,
-# because a head binding and a byte binding are different promises.
+# because a head binding, a byte binding and a signature are different
+# promises.
+fn signed_binding_detail(signer :: Str) -> Str {
+  str.join(["signature verifies over the statement as carried, signed by ", signer], "")
+}
+
 fn binding_detail(e :: rec.Evidence) -> Str {
   if str.is_empty(e.trail_head) {
     "evidence digest matches and the hash chain is intact"
@@ -279,27 +286,60 @@ fn binding_detail(e :: rec.Evidence) -> Str {
   }
 }
 
+# ---- Signed-statement evidence -------------------------------------------
+# The same shape as the chain path below, with the signature standing where
+# chain integrity stands: settle whether the evidence is what it claims to be,
+# and only then read what it says. A signature that does not verify is
+# repudiation, not weak evidence — TAMPERED, and no claim is scored.
+#
+# What the signature adds over a chain is provenance: a chain proves nobody
+# edited the events, a signature proves a specific key vouched for them. What
+# it still does not prove is that the key is one you trust; the record commits
+# to the envelope's BYTES (`sha256`), and since the envelope names its signer,
+# that binding is what stops a different signer's envelope being swapped in.
+# A trust list of acceptable keys is the next step and does not exist here.
+fn verify_signed(r :: rec.Run, e :: rec.Evidence, content :: Str) -> RunVerdict {
+  match attest.parse(content) {
+    Err(msg) => tampered(r, str.join(["evidence is not a readable signed statement: ", msg], ""), "evidence unparseable; claim not scored"),
+    Ok(env) => match attest.statement_of(env) {
+      Err(msg) => tampered(r, msg, "evidence repudiated; claim not scored"),
+      Ok(statement_json) => match derive.metrics_signed(e.kind, statement_json) {
+        Err(msg) => tampered(r, str.join(["signature verifies but a ", e.kind, " statement is malformed: ", msg], ""), "evidence unusable; claim not scored"),
+        Ok(ms) => verdict(r.run_id, Verified, signed_binding_detail(attest.signer_of(env)), score_all(ms, r.results_json)),
+      },
+    },
+  }
+}
+
 fn verify_content(r :: rec.Run, e :: rec.Evidence, content :: Str) -> RunVerdict {
   if not is_bound(e) {
     verdict(r.run_id, Unverifiable, str.join(["evidence is unbound: ", e.path, " was recorded with neither a digest nor a trail head"], ""), all_claims_as(r.results_json, Unverifiable, "evidence is unbound; nothing commits the record to it"))
   } else {
     match check_digest(e, content) {
       Err(msg) => tampered(r, msg, "evidence repudiated; claim not scored"),
-      Ok(_) => match tr.parse_jsonl(content) {
-        Err(msg) => tampered(r, str.concat("evidence is not a readable trail: ", msg), "evidence unparseable; claim not scored"),
-        Ok(lines) => if not tr.trail_intact(lines) {
-          tampered(r, "trail hash chain is broken: an event id does not recompute, or a parent link is wrong", "evidence repudiated; claim not scored")
-        } else {
-          match check_head(e, lines) {
-            Err(msg) => tampered(r, msg, "evidence repudiated; claim not scored"),
-            Ok(_) => match derive.metrics(e.kind, lines) {
-              Err(msg) => tampered(r, str.join(["trail intact but a ", e.kind, " payload is malformed: ", msg], ""), "evidence unusable; claim not scored"),
-              Ok(ms) => verdict(r.run_id, Verified, binding_detail(e), score_all(ms, r.results_json)),
-            },
-          }
-        },
+      Ok(_) => if derive.is_signed_statement(e.kind) {
+        verify_signed(r, e, content)
+      } else {
+        verify_trail(r, e, content)
       },
     }
+  }
+}
+
+fn verify_trail(r :: rec.Run, e :: rec.Evidence, content :: Str) -> RunVerdict {
+  match tr.parse_jsonl(content) {
+    Err(msg) => tampered(r, str.concat("evidence is not a readable trail: ", msg), "evidence unparseable; claim not scored"),
+    Ok(lines) => if not tr.trail_intact(lines) {
+      tampered(r, "trail hash chain is broken: an event id does not recompute, or a parent link is wrong", "evidence repudiated; claim not scored")
+    } else {
+      match check_head(e, lines) {
+        Err(msg) => tampered(r, msg, "evidence repudiated; claim not scored"),
+        Ok(_) => match derive.metrics(e.kind, lines) {
+          Err(msg) => tampered(r, str.join(["trail intact but a ", e.kind, " payload is malformed: ", msg], ""), "evidence unusable; claim not scored"),
+          Ok(ms) => verdict(r.run_id, Verified, binding_detail(e), score_all(ms, r.results_json)),
+        },
+      }
+    },
   }
 }
 
