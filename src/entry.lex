@@ -26,6 +26,8 @@ import "./trail" as tr
 
 import "./derive" as derive
 
+import "./attest" as attest
+
 # The JSON a client submits. `config` and `results` are open maps, held as
 # opaque `Json` on the parse side and normalised into canonical strings by
 # `rec.build` so that key order cannot change a record's identity.
@@ -63,16 +65,40 @@ fn bind_trail_head(e :: rec.Evidence, content :: Str) -> Result[rec.Evidence, St
   }
 }
 
+# A signed statement has no chain and no head; what commits the record to it
+# is the digest of the envelope's bytes, which — because the envelope names
+# its signer — is also what stops a different signer's envelope being swapped
+# in later. So this family always gets the byte binding.
+#
+# And the same rule the trail path applies: submission is where evidence that
+# does not hold up should be caught, not months later at verify time. A trail
+# whose chain is already broken is refused here; an envelope whose signature
+# does not verify is refused here for exactly the same reason.
+fn bind_signed(e :: rec.Evidence, content :: Str) -> Result[rec.Evidence, Str] {
+  match attest.statement_of_content(content) {
+    Err(msg) => Err(str.join(["refusing to record ", e.path, ": ", msg], "")),
+    Ok(_) => Ok(e),
+  }
+}
+
+fn needs_digest(e :: rec.Evidence) -> Bool {
+  str.is_empty(e.sha256) and (derive.is_signed_statement(e.kind) or not derive.has_deriver(e.kind))
+}
+
 fn bind_evidence(e :: rec.Evidence) -> [io] Result[rec.Evidence, Str] {
   match io.read(e.path) {
     Err(msg) => Err(str.join(["cannot read evidence ", e.path, ": ", msg], "")),
     Ok(content) => {
-      let with_digest := if str.is_empty(e.sha256) and not derive.has_deriver(e.kind) {
+      let with_digest := if needs_digest(e) {
         { kind: e.kind, path: e.path, sha256: crypto.sha256_str(content), trail_head: e.trail_head }
       } else {
         e
       }
-      bind_trail_head(with_digest, content)
+      if derive.is_signed_statement(e.kind) {
+        bind_signed(with_digest, content)
+      } else {
+        bind_trail_head(with_digest, content)
+      }
     },
   }
 }

@@ -46,13 +46,20 @@ positioned to provide.
 
 Verification splits in two, and the split is the whole design:
 
-- **Shared, and security-critical.** Is this a well-formed lex-trail? Does
-  every event id recompute? Does every `parent` link hold? Does the file's
-  digest match what the record committed to? None of this knows or cares what
-  the events mean, so it is written once and reused verbatim.
-- **Per-domain, and small.** What do these events MEAN? That lives in
+- **Shared, and security-critical.** Is this evidence what it claims to be?
+  For a trail: does every event id recompute, does every `parent` link hold,
+  does the digest match what the record committed to. For a signed statement:
+  does the signature check out over the exact bytes it covers. None of this
+  knows or cares what the evidence MEANS, so it is written once and reused
+  verbatim.
+- **Per-domain, and small.** What does this evidence mean? That lives in
   `src/derive/`, one module per evidence kind, each publishing a flat list of
   named integers. `src/verify.lex` only ever looks a key up and diffs it.
+
+Evidence comes in two **families**, split by how integrity is established — a
+hash-chained trail, or a signed statement (`src/attest.lex`). Everything above
+that split is shared; the verifier picks the family, and the four verdicts
+mean the same thing on both sides.
 
 A run's evidence entries already carry a `kind`, and that kind selects the
 deriver. Adding a domain is a new module under `src/derive/` plus one arm in
@@ -63,6 +70,7 @@ changes.
 |---|---|---|
 | `replay_trail` | `src/derive/robot.lex` | `actions`, `denials`, `denial_rate_pct`, `<skill>.<axis>.violations` / `.mean_overshoot_milli` / `.max_overshoot_milli` |
 | `loom_sprint_trail` | `src/derive/loom.lex` | `nodes_started`, `nodes_accepted`, `nodes_denied`, `denial_rate_pct`, `bounces`, `graph_rejections`, `phases_advanced`, `sprint_success`, `fully_sealed`, `gate.<gate>.denials`, `phase.<phase>.bounces` |
+| `moe_parity_attestation` | `src/derive/moe.lex` | `version`, `heads`, `top_k`, `prompts`, `tokens_match`, `max_rel_l2_micro`, `tolerance_micro`, `pass` (recomputed), `pass_stated` |
 
 The two domains are more alike than they look: loom's `loom.node.denied` is a
 gate refusing an artifact exactly as the robot's grant refuses an out-of-box
@@ -208,6 +216,74 @@ to argue about. Any key no deriver published — a string like
 `"eval": "FAILED"`, or a fractional value — is reported `UNVERIFIABLE` with a
 reason. A MuJoCo SUCCESS/FAILED verdict has no trail
 representation, and inventing a check for it would be worse than admitting it.
+
+## Signed evidence: lex-moe parity attestations
+
+A trail proves nobody edited the events. It does not say who produced them.
+[lex-moe](https://github.com/alpibrusl/lex-moe) already closes that gap for
+one kind of claim: `moe attest` measures a quantized variant against its f32
+source over a fixed prompt suite and **signs** the result with ed25519 —
+"candidate manifest C matched reference R, greedy tokens identical, worst
+relative-L2 logit distance D, judged against tolerance T".
+
+```sh
+moe attest --store DIR --reference <f32-hash> --candidate <q8-hash>
+#   attestations/<candidate>.parity.json       lex-moe's own form
+#   attestations/<candidate>.parity.env.json   the portable envelope  <- bind this
+```
+
+Bind the **envelope**, not the `.parity.json`. The signature covers
+`serde_json` over a Rust struct, so checking it from here would mean
+re-implementing that crate's field order, its hash encoding and its
+shortest-roundtrip float formatter, byte for byte — a second unversioned copy
+of a security-critical encoding, which is exactly what this repo refused to
+write for `event.compute_id`. The envelope carries the **signed bytes beside
+the signature** (the detached-JWS idea without the JOSE dependency), so
+verification is decode-then-check with nothing to reproduce.
+
+```sh
+./bin/notebooklab record fixtures/entry_moe_parity.json
+./bin/notebooklab verify
+```
+
+```
+6d5749322c76  VERIFIED  (evidence: VERIFIED — signature verifies over the
+              statement as carried, signed by bf47fb49aff72c30…)
+    heads                             VERIFIED
+    max_rel_l2_micro                  VERIFIED
+    pass                              VERIFIED
+    prompts                           VERIFIED
+    tokens_match                      VERIFIED
+    tolerance_micro                   VERIFIED
+```
+
+Three things about that verdict are worth stating exactly, because
+"VERIFIED" has to keep meaning one thing:
+
+- **`pass` is recomputed, not read back.** It is derived from the statement's
+  own distance and tolerance (`13 <= 50000`), and the statement's own pass bit
+  is published separately as `pass_stated`. A signed statement that
+  contradicts itself shows up as a disagreement between the two rather than as
+  a green tick.
+- **The distance is compared in millionths, not floats.** `max_rel_l2_micro`
+  scales the decimal literal *as signed* — exactly, then rounded once — so the
+  comparison never depends on a float parser. A literal the scaler will not
+  represent safely publishes no key at all, and the claim reads
+  `UNVERIFIABLE`. That is the same stance as every other deriver: an honest
+  "cannot say" beats a guess.
+- **Nothing here re-runs the models.** The signature is what makes lex-moe's
+  measurement worth quoting; this package checks that the measurement is
+  intact, signed, and that the ledger reports the numbers that were signed.
+
+Editing a claim after signing is caught at **submission**, not months later —
+the signed analogue of refusing to record a trail whose chain is already
+broken:
+
+```
+$ ./bin/notebooklab record fixtures/entry_moe_edited.json
+refusing to record …env.json: signature does not verify:
+the statement is not what bf47fb49aff72c30… signed
+```
 
 ## The seed corpus
 
@@ -361,11 +437,24 @@ Stated plainly, in the spirit of lex-robot's fleet arbiter documenting its own:
   and `write` but no `O_APPEND`, so `append` is read-modify-write: not atomic,
   and two concurrent writers can lose a record. Fine for a lab tool; the first
   thing to fix if this takes concurrent writers.
-- **`verify` proves derivation, not provenance.** It proves the recorded
-  numbers follow from the bound trail and that the trail has not been edited.
-  It does not prove the trail came from the run it claims to — nothing here is
-  signed yet. Signing the trail at emission (lex-jose is already in the
-  ecosystem) is the natural next step.
+- **On a trail, `verify` proves derivation, not provenance.** It proves the
+  recorded numbers follow from the bound trail and that the trail has not been
+  edited. It does not prove the trail came from the run it claims to — trails
+  are not signed. Signing them at emission (lex-jose is already in the
+  ecosystem) remains the natural next step.
+- **On a signed statement, provenance IS proven — but not trust.** The
+  `moe_parity_attestation` family checks an ed25519 signature over the bytes
+  it covers, so "a specific key vouched for these numbers" is established
+  rather than assumed. What is still missing is a **trust list**: nothing says
+  which keys are acceptable, so a valid signature by an unknown key reads the
+  same as one by yours. Until that exists, the record's `sha256` binding is
+  what pins the signer — it commits to the envelope's bytes, and the envelope
+  names its key.
+- **A signed statement is not a re-measurement.** Checking a parity
+  attestation proves it is intact, signed, and that the ledger's numbers are
+  the signed ones — it does not re-run the models. `pass` is the one part
+  recomputed here (from the statement's own distance and tolerance), which is
+  why a statement that contradicts itself cannot present as verified.
 - **`results` must be a flat JSON object.** Claims are extracted by pattern;
   keys nested inside a sub-object would be lifted to the top level.
 
@@ -404,6 +493,8 @@ src/metric.lex      the deriver/verifier interface: named integers   (#4)
 src/derive.lex      evidence kind -> deriver dispatch                (#4)
 src/derive/robot.lex  lex-robot governed rollouts                    (#4)
 src/derive/loom.lex   lex-loom sprint trails                         (#4)
+src/derive/moe.lex    lex-moe signed parity attestations
+src/attest.lex      signed-statement evidence: envelope + ed25519
 src/verify.lex      claims vs evidence, the four verdicts            (#4)
 src/entry.lex       submit -> validate -> bind evidence -> append    (#3)
 src/cli.lex         record / list / show / verify, acli envelopes    (#5)

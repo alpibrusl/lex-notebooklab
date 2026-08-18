@@ -1,0 +1,31 @@
+{
+  "attempt": "q8_0-edited-evidence",
+  "series": "moe-quantization-parity",
+  "trainer": "moe attest --scheme q8_0",
+  "config": {
+    "reference": "5d740645eb48423101e19f159f786c4f434ac6b83289787bdf4dd82d6dbaa24c",
+    "candidate": "c1f7770b48376b134aaed1662fc6b22d314fa29a7ffde8a9257e52f6838e97f3",
+    "steps": 4
+  },
+  "results": {
+    "version": 1,
+    "heads": 4,
+    "top_k": 2,
+    "prompts": 3,
+    "tokens_match": 1,
+    "max_rel_l2_micro": 13,
+    "tolerance_micro": 50000,
+    "pass": 1
+  },
+  "evidence": [
+    {
+      "kind": "moe_parity_attestation",
+      "path": "fixtures/moe_parity_attestation_edited.env.json",
+      "sha256": "",
+      "trail_head": ""
+    }
+  ],
+  "notes": "The measured distance was improved inside the signed bytes after signing.",
+  "supersedes": "",
+  "created_at": 1755000000000
+}
