@@ -1,7 +1,7 @@
 [package]
 name    = "lex-notebooklab"
 version = "0.1.0"
-lex     = "0.10.10"
+lex     = "0.10.13"
 license = "EUPL-1.2"
 description = "Verifiable experiment tracking — a run is a trail, not a score"
 
@@ -36,7 +36,7 @@ description = "Verifiable experiment tracking — a run is a trail, not a score"
 #     and tests/test_trail.lex pins that decision down with a byte-level
 #     compatibility assertion against a real committed lex-robot trail.
 #
-# The toolchain itself is pinned everywhere (`lex = "0.10.10"` above and
+# The toolchain itself is pinned everywhere (`lex = "0.10.13"` above and
 # LEX_VERSION in .github/workflows/ci.yml) — the one pin that is always
 # available and always honoured.
 [dependencies]
