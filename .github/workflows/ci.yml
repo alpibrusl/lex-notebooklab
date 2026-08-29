@@ -22,7 +22,7 @@ jobs:
     env:
       # Pinned. The toolchain is the one pin that is always available and
       # always honoured — see the dependency notes in lex.toml.
-      LEX_VERSION: v0.10.10
+      LEX_VERSION: v0.10.13
     steps:
       - uses: actions/checkout@v4
 
